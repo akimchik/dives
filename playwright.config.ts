@@ -9,7 +9,13 @@ loadEnvFiles();
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 30_000,
+  // CI (shared runners, a separate test-postgres service container over the
+  // docker network instead of localhost) is measurably slower than local
+  // docker-compose -- the heaviest test here (create -> edit -> delete, ~30
+  // assertions + several real Postgres round trips) ran fine locally but hit
+  // the flat 30s budget in Gitea Actions. Local dev keeps the tighter budget
+  // so a genuinely hung test still fails fast.
+  timeout: process.env.CI ? 60_000 : 30_000,
   expect: {
     timeout: 5_000,
   },

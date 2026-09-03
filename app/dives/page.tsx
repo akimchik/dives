@@ -1,0 +1,120 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Plus, Star, Waves } from "lucide-react";
+
+import { AppShell } from "@/components/app-shell";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  formatDiveDate,
+  formatDiveTime,
+  formatMeasurement,
+  formatMinutes,
+} from "@/lib/dive-format";
+import { listDives } from "@/lib/dives";
+import { requireUser } from "@/lib/session";
+import { cn } from "@/lib/utils";
+
+export const metadata: Metadata = {
+  title: "Logbook · Dives",
+};
+
+function Rating({ value }: { value: number | null }) {
+  if (value === null) return null;
+
+  return (
+    <span className="flex items-center gap-0.5" aria-label={`Rated ${value} out of 5`}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          aria-hidden
+          className={cn(
+            "size-3.5",
+            star <= value ? "fill-foreground text-foreground" : "text-muted-foreground/40",
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
+export default async function DivesPage() {
+  // requireUser redirects unauthenticated visitors to `/?next=/dives` before any query runs, so a
+  // logged-out request never reaches listDives and never renders dive data.
+  const user = await requireUser("/dives");
+  const dives = await listDives(user.id);
+
+  return (
+    <AppShell email={user.email}>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight">Logbook</h1>
+            <p className="text-sm text-muted-foreground">
+              {dives.length === 0
+                ? "No dives logged yet."
+                : `${dives.length} ${dives.length === 1 ? "dive" : "dives"}, most recent first.`}
+            </p>
+          </div>
+          <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
+            <Plus /> Log a dive
+          </Link>
+        </div>
+
+        {dives.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+              <Waves className="size-8 text-muted-foreground" aria-hidden />
+              <p className="text-sm text-muted-foreground">
+                Your logbook is empty. Log your first dive to start building it.
+              </p>
+              <Link
+                href="/dives/new"
+                className={cn(buttonVariants({ variant: "outline" }), "no-underline")}
+              >
+                <Plus /> Log a dive
+              </Link>
+            </CardContent>
+          </Card>
+        ) : (
+          <ol data-testid="dive-list" className="flex flex-col gap-2">
+            {dives.map((dive, index) => (
+              <li key={dive.id}>
+                <Link
+                  href={`/dives/${dive.id}`}
+                  className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg border border-border bg-card px-4 py-3 no-underline shadow-sm transition-colors hover:bg-accent/50"
+                >
+                  {/* Dive numbers count up from the oldest dive, the way a paper logbook does, so
+                      the newest entry carries the highest number even though it is listed first. */}
+                  <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
+                    #{dives.length - index}
+                  </span>
+
+                  <span className="min-w-0 flex-1 basis-48">
+                    <span className="block truncate font-medium">
+                      {dive.site_name ?? "Unnamed site"}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {formatDiveDate(dive.occurred_at)} · {formatDiveTime(dive.occurred_at)}
+                      {dive.site_location ? ` · ${dive.site_location}` : ""}
+                    </span>
+                  </span>
+
+                  <span className="w-16 shrink-0 text-right text-sm tabular-nums">
+                    {formatMeasurement(dive.max_depth, "m") ?? "—"}
+                  </span>
+                  <span className="w-16 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                    {formatMinutes(dive.bottom_time_minutes) ?? "—"}
+                  </span>
+                  <span className="w-20 shrink-0">
+                    <Rating value={dive.rating} />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </AppShell>
+  );
+}

@@ -107,6 +107,54 @@ because the CSV attachment writes one cell per key. Each enqueue mints its own
 `dive-backup:<id>:<event>:<uuid>` idempotency key, so two consecutive edits of the
 same dive produce two outbox rows instead of collapsing into one.
 
+## Dive logbook screens
+
+| Route | What it renders |
+| --- | --- |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + the five most recent dives |
+| `/dives` | The whole logbook, newest first |
+| `/dives/[id]` | One dive in full, with its depth-profile chart |
+| `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
+
+All five call `requireUser("<their own path>")` before any query, so a logged-out
+request is redirected (307) to `/?next=…` and never reaches `lib/dives.ts`.
+`/dives/[id]` and `/dives/[id]/edit` render `notFound()` both for ids that do not
+exist and for ids owned by someone else — the two are deliberately
+indistinguishable.
+
+Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
+every authenticated screen), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
+over the user's own sites, with inline create), `depth-profile-field.tsx`,
+`depth-profile-chart.tsx` and `delete-dive-button.tsx`. Every button that makes a
+server call follows `AGENTS.md`'s convention: disabled with a spinner for the
+duration, then a sonner toast on the result.
+
+### Depth profile
+
+`lib/depth-profile.ts` is framework-free and has no `server-only` import on
+purpose, so the exact same parser runs in two places: the form parses the pasted
+or uploaded text in the browser on every keystroke (so a malformed profile
+disables submit and shows the parser's own line-specific error before any server
+action is called, and `depth_profile` is never partially written), and the detail
+page narrows the JSONB it read back with the same module's `isDepthProfile`
+guard. The raw text is stored verbatim in `depth_profile_raw` alongside the
+derived `depth_profile` JSON, so a future parser change can re-derive it.
+
+`components/depth-profile-chart.tsx` is dependency-free inline SVG rather than a
+charting library, which keeps it a plain server component — the detail page ships
+no chart JavaScript. The y axis is *not* inverted: depth grows downward, so the
+trace reads like a dive computer's.
+
+### Theme
+
+`components/CausticOverlay.tsx` is a byte-for-byte copy of the component from
+`2prutsers.com` and is mounted once in `app/layout.tsx`. It is the only
+underwater motif in the app — deliberately. Nothing else changes Tailwind theme
+colours or fonts, and no other component adds wave/bubble decoration. It is
+`fixed`, `pointer-events-none` and sits at `z-index: 6`; `AppShell` puts page
+content at `z-10` so the light rays wash over the background rather than the
+text.
+
 ## Run the app
 
 ```sh

@@ -1,0 +1,17 @@
+ingress:
+  clusterIssuer: "letsencrypt-prod"
+
+env:
+  HEALTHCHECK_PING_URL: "https://healthchecks.aleksandr.vin/ping/REPLACE_WITH_REAL_TOKEN"
+  # Sender identity for dive backup / signup notification emails.
+  email_host_user: "zulu@aleksandr.vin"
+  DIVES_ADMIN_EMAIL: "admin@aleksandr.vin"
+  DIVES_ADMIN_NAME: "Mr. Admin"
+  OTEL_DEPLOYMENT_ENVIRONMENT: "dev"
+
+appSecrets:
+  email_host_password: "replace-with-email-host-password"
+  DIVES_ADMIN_PASSWORD: "replace-with-admin-password"
+
+notifications:
+  schedule: "*/2 * * * *"

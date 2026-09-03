@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: dives-postgres
+    environment:
+      POSTGRES_DB: dev_dives
+      POSTGRES_USER: dives_user
+      POSTGRES_PASSWORD: dives
+    ports:
+      - "5432:5432"
+    volumes:
+      - dives_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dives_user -d dev_dives"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  pgadmin:
+    image: dpage/pgadmin4:2026-06-17-2
+    container_name: dives-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@aleksandr.vin}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - dives_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+# No MinIO/object storage: dive media is an explicit non-goal for v1.
+volumes:
+  dives_postgres_data:
+  dives_pgadmin_data:

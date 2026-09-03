@@ -1,0 +1,6 @@
+{
+  "ignore": [
+    "components/**",
+    "scripts/env.d.mts"
+  ]
+}

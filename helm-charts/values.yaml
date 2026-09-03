@@ -1,0 +1,131 @@
+replicaCount: 1
+
+image:
+  # k3s node containerd mirrors this hostname to the registry over
+  # loopback (see pumpking/host-config/README.md).
+  repository: registry.pumpking.aleksandr.vin/dives/web
+  pullPolicy: Always # IfNotPresent
+  tag: amnesiac
+
+deploymentId: "xxx-unknown-xxx"
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  name: ""
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  runAsUser: 1001
+  runAsGroup: 1001
+
+service:
+  type: ClusterIP
+  port: 80
+
+env:
+  # postgres.data is the host-level compose Postgres, exposed in-cluster via
+  # a selector-less Service (pumpking/manifests/host-services.yaml). No
+  # sslmode param: that instance has no TLS configured at all, so requesting
+  # TLS would fail the handshake outright rather than downgrade gracefully.
+  DATABASE_URL: "postgres://postgres.data.svc.cluster.local:5432/dev_dives"
+  # HEALTHCHECK_PING_URL: "https://healthchecks.aleksandr.vin/ping/..."
+  HEALTHCHECK_PING_INTERVAL_SECONDS: "60"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-opentelemetry-collector.default.svc.cluster.local:4317"
+  OTEL_SERVICE_NAME: "dives"
+  email_host: "smtp.protonmail.ch"
+  email_port: "587"
+  email_use_starttls: "true"
+  # The address dive backup emails are sent *from*.
+  email_host_user: "zulu@aleksandr.vin"
+  DIVES_ADMIN_EMAIL: "admin@aleksandr.vin"
+  DIVES_ADMIN_NAME: "Admin"
+  NEXT_PUBLIC_BASE_URL: "https://dives.aleksandr.vin"
+  # Local email/password + magic-link login stays in the codebase but is off
+  # by default -- Authentik is the only sign-in path unless this is set to
+  # "true" (see lib/auth-config.ts). Absent entirely = disabled, same as
+  # "false".
+  # PASSWORD_AUTH_ENABLED: "true"
+  # Granted ordinary CRUD on every table once per db-migrate.mjs run (see
+  # scripts/db-migrate.mjs's grantAppRoleOperationalAccess) -- must match
+  # provisioning/projects.yaml's app_role for this project exactly. This is
+  # the same role the deployed app and every CronJob (except the migration
+  # container) actually connects as, see databaseApp below.
+  APP_DB_ROLE: "dev-dives.dev-dives_app"
+
+# Schema owner -- runs DDL (migrations/*.sql) and the app-role grant
+# bookkeeping. Used ONLY by the migration initContainer (see
+# deployment.yaml); the running app and every other CronJob connect as
+# databaseApp below instead, never as this role, so a compromise of the
+# live web server (the actual attack surface) can't reach owner privileges.
+database:
+  secretName: dev-dives-db-credentials
+  usernameKey: user
+  passwordKey: password
+
+# Low-privilege runtime role -- ordinary CRUD on every table, no DDL. This
+# is what the deployed app container and every CronJob except the migration
+# initContainer actually connects as. Created by pumpking's Terraform
+# alongside `database` above (provisioning/terraform/secrets.tf's
+# db_app_credentials).
+databaseApp:
+  secretName: dev-dives-db-app-credentials
+  usernameKey: user
+  passwordKey: password
+
+migration:
+  enabled: true
+
+notifications:
+  schedule: "*/2 * * * *"
+  batchSize: "50"
+  gapMs: "1500"
+  retryBaseMs: "2000"
+  maxBackoffMs: "3600000"
+  staleLockMs: "600000"
+  maxAttempts: "8"
+
+appSecrets:
+  email_host_password: "replace-with-email-host-password"
+  DIVES_ADMIN_PASSWORD: "replace-with-admin-password"
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "500Mi"
+  limits:
+    cpu: "500m"
+    memory: "4000Mi"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+ingress:
+  clusterIssuer: "letsencrypt-staging" # or "letsencrypt-prod"
+  host: dives.aleksandr.vin
+  tls:
+    secretName: dives-aleksandr-vin-tls
+
+# Name of the Secret pumpking's provisioning/terraform/authentik.tf
+# (kubernetes_secret.authentik_client) creates and keeps in sync --
+# AUTHENTIK_CLIENT_ID/AUTHENTIK_CLIENT_SECRET for whatever OAuth2 Provider
+# is currently live in Authentik for this project.
+authentikSecretName: "dev-dives-authentik-secret"
+
+persistentVolume:
+  # -- Set to true to provision a PVC (see templates/pvc.yaml) for this release.
+  # AGENTS NOTE: the underlying PersistentVolume must be created via the `pumpking` MCP
+  # server (mcp__pumpking__add-pv), not by hand. Create the PV first, then point
+  # volumeName below at it before enabling this.
+  enabled: false
+  # -- Size of the volume. Should be calculated based on the metrics you send and retention policy you set.
+  size: 1Gi
+  # -- PV name
+  volumeName: pv-dives

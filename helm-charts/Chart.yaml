@@ -1,0 +1,4 @@
+apiVersion: v2
+name: dives-chart
+description: A Helm chart for Kubernetes to deploy the dives application
+version: 0.1.0

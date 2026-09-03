@@ -1,0 +1,213 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: "{{ .Release.Name }}-web"
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ .Release.Name }}-web"
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: "{{ .Release.Name }}-web"
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }} # https://v3.helm.sh/docs/howto/charts_tips_and_tricks/#automatically-roll-deployments
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.migration.enabled }}
+      initContainers:
+        - name: migration
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }} # Microk8s private registry exposed on localhost:32000.
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node"]
+          args: ["scripts/db-migrate.mjs"]
+          env:
+          {{- range $key, $value := .Values.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+          {{- end }}
+          {{- range $key, $_ := .Values.appSecrets }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ $.Release.Name }}-app-secrets"
+                  key: {{ $key | quote }}
+          {{- end }}
+            # The one and only place that connects as the schema owner --
+            # runs DDL + the app-role grant/revoke bookkeeping. Every other
+            # container in this chart uses .Values.databaseApp instead.
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "database.secretName is required" .Values.database.secretName | quote }}
+                  key: {{ .Values.database.usernameKey | quote }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "database.secretName is required" .Values.database.secretName | quote }}
+                  key: {{ .Values.database.passwordKey | quote }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }} # Microk8s private registry exposed on localhost:32000.
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: configs
+              mountPath: /configs
+              readOnly: true
+          env:
+            - name: NEXT_DEPLOYMENT_ID
+              value: "{{ .Values.deploymentId }}"
+            - name: OTEL_SERVICE_VERSION
+              value: "{{ .Values.deploymentId }}"
+          {{- range $key, $value := .Values.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+          {{- end }}
+          {{- range $key, $_ := .Values.appSecrets }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ $.Release.Name }}-app-secrets"
+                  key: {{ $key | quote }}
+          {{- end }}
+            # The running app connects as the restricted app role, never the
+            # schema owner (that's the migration initContainer above, which
+            # deliberately still points at .Values.database) -- see
+            # values.yaml's databaseApp comment.
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "databaseApp.secretName is required" .Values.databaseApp.secretName | quote }}
+                  key: {{ .Values.databaseApp.usernameKey | quote }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "databaseApp.secretName is required" .Values.databaseApp.secretName | quote }}
+                  key: {{ .Values.databaseApp.passwordKey | quote }}
+            - name: AUTHENTIK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authentikSecretName | quote }}
+                  key: AUTHENTIK_CLIENT_ID
+            - name: AUTHENTIK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.authentikSecretName | quote }}
+                  key: AUTHENTIK_CLIENT_SECRET
+          ports:
+            - name: http
+              containerPort: 3000
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            timeoutSeconds: 3
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 0
+            timeoutSeconds: 3
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 0
+            timeoutSeconds: 3
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: configs
+          configMap:
+            defaultMode: 0555
+            name: "{{ .Release.Name }}-configs"
+
+{{- if .Values.appSecrets }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "{{ .Release.Name }}-app-secrets"
+type: Opaque
+data:
+{{- range $key, $value := .Values.appSecrets }}
+  {{ $key }}: {{ $value | b64enc }}
+{{- end }}
+{{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}-web
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: http
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  annotations:
+    # Traefik (k3s default) since the microk8s/ingress-nginx rebuild, not
+    # nginx -- this project's Ingress was never converted during that
+    # migration (every other app's was, see pumpking's Phase E). The
+    # force-ssl-redirect equivalent is this namespace-scoped Middleware
+    # the reconciler's Terraform already creates for every projects.yaml
+    # entry (provisioning/terraform/middleware.tf) -- nothing to
+    # provision here, just reference it.
+    traefik.ingress.kubernetes.io/router.middlewares: dev-dives-redirect-https@kubernetescrd
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    # proxy-body-size/proxy-read-timeout/proxy-send-timeout and the
+    # forwarded-headers annotations dropped, not translated -- Traefik
+    # has no per-Ingress annotation equivalent (would need a separate
+    # ServersTransport CRD) and its own defaults are already
+    # unrestricted/pass-through, unlike nginx's. Same call already made
+    # for the registry's Ingress during Phase E; revisit only if large
+    # uploads actually hit a real limit in practice.
+spec:
+  tls:
+  - hosts:
+      - {{ .Values.ingress.host }}
+    secretName: {{ .Values.ingress.tls.secretName }} # cert-manager will store the created certificate in this secret
+  rules:
+  - host: {{ .Values.ingress.host }}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ .Release.Name }}-service
+            port:
+              number: 80

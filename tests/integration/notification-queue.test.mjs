@@ -47,6 +47,30 @@ async function enqueueSignup(recipient, key) {
   });
 }
 
+function divePayload(event = "create") {
+  return {
+    event,
+    dive: {
+      id: 4321,
+      occurred_at: "2026-08-09T07:30:00.000Z",
+      site_name: "Blue Hole",
+      max_depth: "28.40",
+      bottom_time_minutes: 44,
+      notes: 'said "wow", twice',
+      depth_profile: [{ t: 0, d: 0 }],
+    },
+  };
+}
+
+async function enqueueDiveBackup(recipient, key, event = "create") {
+  return enqueueNotification(client, {
+    recipientEmail: recipient,
+    notificationType: "dive_backup",
+    idempotencyKey: key,
+    payload: divePayload(event),
+  });
+}
+
 async function statusOf(id) {
   const result = await client.query("select * from notification_queue where id = $1", [id]);
   return result.rows[0];
@@ -252,5 +276,113 @@ describe("processNotificationQueue", () => {
     expect(mine[0].subject).toBe("New user signup: new-user@example.com");
     expect(mine[0].text).toContain("This is user #7 (excluding test accounts).");
     expect((await statusOf(id)).status).toBe("sent");
+  });
+});
+
+// dive_backup is the queue's only non-combinable type: each row carries its own per-dive
+// attachments, so it must never be folded into a recipient's combined email (plan step 4).
+describe("processNotificationQueue dive_backup per-row sends", () => {
+  it("sends a dive_backup row on its own while still batching the recipient's combinable rows", async () => {
+    const recipient = `mixed-${randomUUID()}@example.com`;
+    const signupA = await enqueueSignup(recipient, `mixed-signup-a:${randomUUID()}`);
+    const signupB = await enqueueSignup(recipient, `mixed-signup-b:${randomUUID()}`);
+    const backupId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
+
+    const calls = [];
+    await processNotificationQueue(client, {
+      batchSize: 1000,
+      sleep: noSleep,
+      sendMail: async (message) => {
+        calls.push(message);
+        return { sent: true };
+      },
+    });
+
+    const mine = calls.filter((message) => message.to === recipient);
+    expect(mine).toHaveLength(2);
+
+    // (a) Regression: the two new_user_signup rows still collapse into one combined email with no
+    // attachments, exactly as before dive_backup existed.
+    const combined = mine.filter((message) => message.subject === "Dives: 2 updates");
+    expect(combined).toHaveLength(1);
+    expect(combined[0].attachments).toBeUndefined();
+    expect(combined[0].text).toContain("This is user #7 (excluding test accounts).");
+
+    // (b) The dive_backup row is its own email, carrying the JSON + CSV snapshot.
+    const backup = mine.filter((message) => message !== combined[0]);
+    expect(backup).toHaveLength(1);
+    expect(backup[0].subject).toBe("Dive logged: Blue Hole — 2026-08-09T07:30:00.000Z");
+    expect(backup[0].text).toContain("Max depth: 28.40");
+
+    const filenames = backup[0].attachments.map((attachment) => attachment.filename);
+    expect(filenames).toEqual(["dive-4321-create.json", "dive-4321-create.csv"]);
+
+    const json = backup[0].attachments.find((a) => a.filename.endsWith(".json"));
+    expect(json.contentType).toBe("application/json");
+    expect(JSON.parse(json.content)).toEqual(divePayload("create"));
+
+    const csv = backup[0].attachments.find((a) => a.filename.endsWith(".csv"));
+    expect(csv.contentType).toBe("text/csv");
+    const [header, values] = csv.content.trimEnd().split("\n");
+    expect(header).toBe("id,occurred_at,site_name,max_depth,bottom_time_minutes,notes,depth_profile");
+    // A comma/quote-bearing free-text field stays in one properly escaped cell...
+    const scalarCells = '4321,2026-08-09T07:30:00.000Z,Blue Hole,28.40,44,"said ""wow"", twice",';
+    expect(values.startsWith(scalarCells)).toBe(true);
+    // ...and so does the depth profile, as embedded JSON. Postgres normalises jsonb key order, so
+    // this asserts on the parsed value rather than a byte-exact string.
+    const profileCell = values.slice(scalarCells.length);
+    expect(JSON.parse(profileCell.slice(1, -1).replaceAll('""', '"'))).toEqual([{ t: 0, d: 0 }]);
+
+    for (const id of [signupA, signupB, backupId]) {
+      expect((await statusOf(id)).status).toBe("sent");
+    }
+  });
+
+  it("never combines two dive_backup rows for the same recipient", async () => {
+    const recipient = `two-backups-${randomUUID()}@example.com`;
+    const createId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
+    const editId = await enqueueDiveBackup(recipient, `dive-backup:4321:edit:${randomUUID()}`, "edit");
+
+    const calls = [];
+    await processNotificationQueue(client, {
+      batchSize: 1000,
+      sleep: noSleep,
+      sendMail: async (message) => {
+        calls.push(message);
+        return { sent: true };
+      },
+    });
+
+    const mine = calls.filter((message) => message.to === recipient);
+    expect(mine).toHaveLength(2);
+    expect(mine.map((message) => message.subject).sort()).toEqual([
+      "Dive logged: Blue Hole — 2026-08-09T07:30:00.000Z",
+      "Dive updated: Blue Hole — 2026-08-09T07:30:00.000Z",
+    ]);
+    expect(mine.every((message) => message.attachments.length === 2)).toBe(true);
+    expect((await statusOf(createId)).status).toBe("sent");
+    expect((await statusOf(editId)).status).toBe("sent");
+  });
+
+  it("retries only the failing dive_backup row, leaving the recipient's other rows sent", async () => {
+    const recipient = `partial-${randomUUID()}@example.com`;
+    const signupId = await enqueueSignup(recipient, `partial-signup:${randomUUID()}`);
+    const backupId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
+
+    await processNotificationQueue(client, {
+      batchSize: 1000,
+      sleep: noSleep,
+      sendMail: async (message) => {
+        if (message.to === recipient && message.attachments) {
+          throw Object.assign(new Error("greylisted"), { responseCode: 450 });
+        }
+        return { sent: true };
+      },
+    });
+
+    expect((await statusOf(signupId)).status).toBe("sent");
+    const backup = await statusOf(backupId);
+    expect(backup.status).toBe("pending");
+    expect(backup.attempts).toBe(1);
   });
 });

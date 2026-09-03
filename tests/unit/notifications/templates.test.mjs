@@ -1,145 +1,51 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  renderBomUploadedSection,
+  orderedDiveColumns,
   renderCombinedEmail,
-  renderFirstCheckSection,
+  renderDiveBackupEmail,
   renderNewUserSignupSection,
-  renderStatusChangeSection,
-  renderTosAcceptanceSection,
 } from "../../../scripts/notifications/templates.mjs";
 
-const BASE_URL = "https://dives.aleksandr.vin";
-
-function firstCheckSection(filename = "parts.csv", bomFileId = "11") {
-  return renderFirstCheckSection({
-    filename,
-    bomFileId,
-    baseUrl: BASE_URL,
-    items: [{ mpn: "MPN1", manufacturer: "Acme", tone: "active", label: "Active" }],
-  });
-}
-
-function statusChangeSection(filename = "parts.csv", bomFileId = "11") {
-  return renderStatusChangeSection({
-    filename,
-    bomFileId,
-    baseUrl: BASE_URL,
-    changes: [
-      { mpn: "MPN1", manufacturer: "Acme", tone: "obsolete", label: "Obsolete", previousLabel: "Active" },
-    ],
-  });
-}
-
-function bomUploadedSection(filename = "parts.csv", bomFileId = "11") {
-  return renderBomUploadedSection({
-    filename,
-    bomFileId,
-    bomFileUrl: `${BASE_URL}/dashboard/bom/${bomFileId}`,
-    itemCount: 3,
-    manufacturerCounts: { Acme: 2, Beta: 1 },
-  });
+function dive(overrides = {}) {
+  return {
+    id: 12,
+    occurred_at: "2026-08-09T07:30:00.000Z",
+    site_name: "Blue Hole",
+    site_location: "Dahab, Egypt",
+    max_depth: "28.40",
+    bottom_time_minutes: 44,
+    gas_mix: "EAN32",
+    notes: null,
+    depth_profile: [{ t: 0, d: 0 }, { t: 60, d: 12 }],
+    depth_profile_raw: "0,0\n60,12\n",
+    ...overrides,
+  };
 }
 
 describe("renderCombinedEmail single-notification path", () => {
-  it("reuses the first-check subject verbatim", () => {
-    const email = renderCombinedEmail([firstCheckSection()]);
-    expect(email.subject).toBe("Lifecycle check complete: parts.csv");
-  });
+  it("reuses the section's own subject verbatim", () => {
+    const email = renderCombinedEmail([
+      renderNewUserSignupSection({ email: "new-user@example.com", userNumber: 3 }),
+    ]);
 
-  it("reuses the status-change subject verbatim", () => {
-    const email = renderCombinedEmail([statusChangeSection()]);
-    expect(email.subject).toBe("Lifecycle status changed: parts.csv");
-  });
-
-  it("reuses the bom-uploaded subject verbatim", () => {
-    const email = renderCombinedEmail([bomUploadedSection()]);
-    expect(email.subject).toBe("BOM uploaded: parts.csv");
+    expect(email.subject).toBe("New user signup: new-user@example.com");
+    expect(email.html).not.toContain("<h2");
   });
 });
 
 describe("renderCombinedEmail multi-notification path", () => {
-  it("produces a summary subject with one section per distinct notification", () => {
+  it("produces a summary subject with one section per notification", () => {
     const email = renderCombinedEmail([
-      bomUploadedSection(),
-      firstCheckSection(),
-      statusChangeSection(),
+      renderNewUserSignupSection({ email: "first@example.com", userNumber: 1 }),
+      renderNewUserSignupSection({ email: "second@example.com", userNumber: 2 }),
     ]);
 
-    expect(email.subject).toBe("Dives: 3 updates");
-    expect(email.html).toContain("BOM uploaded: parts.csv");
-    expect(email.html).toContain("Lifecycle check complete: parts.csv");
-    expect(email.html).toContain("Lifecycle status changed: parts.csv");
-    // One shared sidenote footer, not one per section.
-    expect(email.text.match(/delete the BOM file from the console/g)).toHaveLength(1);
-  });
-});
-
-describe("renderCombinedEmail heading disambiguation (issue #109)", () => {
-  it("tags colliding headings with their BOM file id when several files share a name", () => {
-    const email = renderCombinedEmail([
-      statusChangeSection("bill_of_materials 2.csv", "6"),
-      statusChangeSection("bill_of_materials 2.csv", "7"),
-      statusChangeSection("bill_of_materials 2.csv", "8"),
-    ]);
-
-    expect(email.subject).toBe("Dives: 3 updates");
-    expect(email.html).toContain("Lifecycle status changed: bill_of_materials 2.csv (BOM file #6)");
-    expect(email.html).toContain("Lifecycle status changed: bill_of_materials 2.csv (BOM file #7)");
-    expect(email.html).toContain("Lifecycle status changed: bill_of_materials 2.csv (BOM file #8)");
-    expect(email.text).toContain("bill_of_materials 2.csv (BOM file #6)");
-    expect(email.text).toContain("bill_of_materials 2.csv (BOM file #7)");
-    expect(email.text).toContain("bill_of_materials 2.csv (BOM file #8)");
-  });
-
-  it("leaves headings untouched when every section is for a distinct filename", () => {
-    const email = renderCombinedEmail([
-      bomUploadedSection("a.csv", "1"),
-      firstCheckSection("b.csv", "2"),
-      statusChangeSection("c.csv", "3"),
-    ]);
-
-    expect(email.html).not.toContain("BOM file #");
-    expect(email.text).not.toContain("BOM file #");
-  });
-
-  it("leaves a single-section email's heading untouched even if a sectionId is present", () => {
-    const email = renderCombinedEmail([statusChangeSection("bill_of_materials 2.csv", "6")]);
-
-    expect(email.html).not.toContain("BOM file #");
-    expect(email.subject).toBe("Lifecycle status changed: bill_of_materials 2.csv");
-  });
-});
-
-describe("renderTosAcceptanceSection", () => {
-  const tip = {
-    seq: "3",
-    recordHashHex: "deadbeef",
-    acceptedAt: "2026-08-09T12:00:00.000Z",
-    totalRowCount: "3",
-  };
-
-  it("includes seq, record hash, accepted_at and total row count", () => {
-    const email = renderCombinedEmail([renderTosAcceptanceSection(tip)]);
-
-    expect(email.subject).toBe("tos_acceptance anchor: seq 3");
-    expect(email.text).toContain("seq: 3");
-    expect(email.text).toContain("record_hash: deadbeef");
-    expect(email.text).toContain("accepted_at: 2026-08-09T12:00:00.000Z");
-    expect(email.text).toContain("total rows: 3");
-  });
-
-  it("carries no footer -- the BOM-file sidenote doesn't apply to an anchor email", () => {
-    const email = renderCombinedEmail([renderTosAcceptanceSection(tip)]);
-
-    expect(email.text).not.toContain("delete the BOM file");
-    expect(email.html).not.toContain("delete the BOM file");
-  });
-
-  it("keeps the BOM-file sidenote when batched alongside a bom_uploaded section", () => {
-    const email = renderCombinedEmail([renderTosAcceptanceSection(tip), bomUploadedSection()]);
-
-    expect(email.text.match(/delete the BOM file from the console/g)).toHaveLength(1);
+    expect(email.subject).toBe("Dives: 2 updates");
+    expect(email.html).toContain("New user signup: first@example.com");
+    expect(email.html).toContain("New user signup: second@example.com");
+    expect(email.text).toContain("This is user #1 (excluding test accounts).");
+    expect(email.text).toContain("This is user #2 (excluding test accounts).");
   });
 });
 
@@ -154,15 +60,6 @@ describe("renderNewUserSignupSection", () => {
     expect(email.text).toContain("This is user #42 (excluding test accounts).");
   });
 
-  it("carries no footer -- the BOM-file sidenote doesn't apply to a signup email", () => {
-    const email = renderCombinedEmail([
-      renderNewUserSignupSection({ email: "new-user@example.com", userNumber: 1 }),
-    ]);
-
-    expect(email.text).not.toContain("delete the BOM file");
-    expect(email.html).not.toContain("delete the BOM file");
-  });
-
   it("escapes the email in the rendered body", () => {
     const email = renderCombinedEmail([
       renderNewUserSignupSection({ email: "<script>bad</script>@example.com", userNumber: 1 }),
@@ -173,68 +70,75 @@ describe("renderNewUserSignupSection", () => {
   });
 });
 
-describe("HTML escaping", () => {
-  it("escapes the filename in the rendered body", () => {
-    const section = renderFirstCheckSection({
-      filename: "<script>bad</script>.csv",
-      bomFileId: "11",
-      baseUrl: BASE_URL,
-      items: [{ mpn: "MPN1", manufacturer: "Acme", tone: "active", label: "Active" }],
-    });
-    const email = renderCombinedEmail([section]);
+describe("orderedDiveColumns", () => {
+  // Postgres normalises jsonb key order, so the payload comes back out of the queue in an order
+  // the server action never chose. Both the email body and the CSV attachment must not inherit it.
+  it("is stable regardless of the payload's own key order", () => {
+    const scrambled = { notes: "x", id: 1, gas_mix: "air", occurred_at: "2026-08-09T07:30:00.000Z" };
+    const other = { occurred_at: "2026-08-09T07:30:00.000Z", gas_mix: "air", notes: "x", id: 1 };
 
-    expect(email.html).toContain("&lt;script&gt;bad&lt;/script&gt;.csv");
-    expect(email.html).not.toContain("<script>bad</script>");
+    expect(orderedDiveColumns(scrambled)).toEqual(["id", "occurred_at", "gas_mix", "notes"]);
+    expect(orderedDiveColumns(other)).toEqual(orderedDiveColumns(scrambled));
+  });
+
+  it("puts unknown columns last, alphabetically, so they are never dropped", () => {
+    expect(orderedDiveColumns({ zeta: 1, id: 2, alpha: 3 })).toEqual(["id", "alpha", "zeta"]);
   });
 });
 
-describe("no per-part identifiers in email bodies", () => {
-  it("first-check emails contain only aggregated status counts, never MPNs", () => {
-    const items = [
-      { mpn: "MPN1", manufacturer: "Acme", tone: "active", label: "Active" },
-      { mpn: "MPN2", manufacturer: "Beta", tone: "active", label: "Active" },
-      { mpn: "MPN3", manufacturer: "Gamma", tone: "obsolete", label: "Obsolete" },
-    ];
-    const section = renderFirstCheckSection({
-      filename: "parts.csv",
-      bomFileId: "11",
-      baseUrl: BASE_URL,
-      items,
-    });
-    const email = renderCombinedEmail([section]);
-
-    for (const item of items) {
-      expect(email.html).not.toContain(item.mpn);
-      expect(email.html).not.toContain(item.manufacturer);
-      expect(email.text).not.toContain(item.mpn);
-      expect(email.text).not.toContain(item.manufacturer);
-    }
-    expect(email.html).toContain("2 &times;");
-    expect(email.text).toContain("- 2 x Active");
-    expect(email.text).toContain("- 1 x Obsolete");
+describe("renderDiveBackupEmail", () => {
+  it("names the event and the dive in the subject", () => {
+    expect(renderDiveBackupEmail({ event: "create", dive: dive() }).subject).toBe(
+      "Dive logged: Blue Hole — 2026-08-09T07:30:00.000Z",
+    );
+    expect(renderDiveBackupEmail({ event: "edit", dive: dive() }).subject).toBe(
+      "Dive updated: Blue Hole — 2026-08-09T07:30:00.000Z",
+    );
+    expect(renderDiveBackupEmail({ event: "delete", dive: dive() }).subject).toBe(
+      "Dive deleted: Blue Hole — 2026-08-09T07:30:00.000Z",
+    );
   });
 
-  it("status-change emails contain only aggregated transition counts, never MPNs", () => {
-    const changes = [
-      { mpn: "MPN1", manufacturer: "Acme", tone: "obsolete", label: "Obsolete", previousLabel: "Active" },
-      { mpn: "MPN2", manufacturer: "Beta", tone: "obsolete", label: "Obsolete", previousLabel: "Active" },
-      { mpn: "MPN3", manufacturer: "Gamma", tone: "nrnd", label: "NRND", previousLabel: "Active" },
-    ];
-    const section = renderStatusChangeSection({
-      filename: "parts.csv",
-      bomFileId: "11",
-      baseUrl: BASE_URL,
-      changes,
-    });
-    const email = renderCombinedEmail([section]);
+  it("falls back to the dive id when the snapshot has no site or date", () => {
+    const email = renderDiveBackupEmail({ event: "delete", dive: { id: 9 } });
+    expect(email.subject).toBe("Dive deleted: dive #9");
+  });
 
-    for (const change of changes) {
-      expect(email.html).not.toContain(change.mpn);
-      expect(email.html).not.toContain(change.manufacturer);
-      expect(email.text).not.toContain(change.mpn);
-      expect(email.text).not.toContain(change.manufacturer);
-    }
-    expect(email.text).toContain("- 2 part(s): Active -> Obsolete");
-    expect(email.text).toContain("- 1 part(s): Active -> NRND");
+  it("renders the dive's fields under human labels in both html and text", () => {
+    const email = renderDiveBackupEmail({ event: "create", dive: dive() });
+
+    expect(email.text).toContain("Dive site: Blue Hole");
+    expect(email.text).toContain("Max depth: 28.40");
+    expect(email.text).toContain("Bottom time (min): 44");
+    expect(email.text).toContain("Gas mix: EAN32");
+    expect(email.html).toContain("<strong>Dive site:</strong> Blue Hole");
+  });
+
+  it("omits empty fields and summarises the depth profile instead of inlining it", () => {
+    const email = renderDiveBackupEmail({ event: "create", dive: dive() });
+
+    expect(email.text).not.toContain("Notes:");
+    expect(email.text).toContain("Depth profile: 2 sample(s) (see the attached JSON)");
+    // The raw import text belongs in the attachment, not the body.
+    expect(email.text).not.toContain("Depth profile raw");
+  });
+
+  it("renders an unknown column with a humanised label rather than dropping it", () => {
+    const email = renderDiveBackupEmail({
+      event: "edit",
+      dive: dive({ deco_model: "Buhlmann ZHL-16C" }),
+    });
+
+    expect(email.text).toContain("Deco model: Buhlmann ZHL-16C");
+  });
+
+  it("escapes html in dive fields", () => {
+    const email = renderDiveBackupEmail({
+      event: "create",
+      dive: dive({ buddy: "<script>bad</script>" }),
+    });
+
+    expect(email.html).toContain("&lt;script&gt;bad&lt;/script&gt;");
+    expect(email.html).not.toContain("<script>bad</script>");
   });
 });

@@ -38,7 +38,9 @@ function isMailerConfigured() {
   return Boolean(settings.host && settings.port && settings.user && settings.password);
 }
 
-export async function sendMail({ to, subject, text, html }) {
+// `attachments` is optional and passed straight through to nodemailer's own attachments option
+// (dive_backup notifications carry a JSON + CSV snapshot of the dive; every other type omits it).
+export async function sendMail({ to, subject, text, html, attachments }) {
   const settings = getMailSettings();
 
   if (!isMailerConfigured()) {
@@ -60,6 +62,7 @@ export async function sendMail({ to, subject, text, html }) {
     subject,
     text,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   });
 
   return { sent: true };

@@ -142,7 +142,32 @@ default `*/2 * * * *`) running `processNotificationQueue` from
 - `lib/notification-queue.ts` (TS, for the Next app) and
   `scripts/notifications/queue.mjs` (plain JS, for the worker) each carry their
   own `enqueueNotification` — the same TS/`.mjs` duplication `lib/mailer.ts`
-  and `scripts/mailer.mjs` use.
+  and `scripts/mailer.mjs` use. The TS one takes an optional
+  `{ client }` second argument so a caller can enqueue inside its own
+  transaction (dive mutations write the dive row and its `dive_backup`
+  notification atomically); without it, it uses a pooled connection.
+
+### Combinable vs per-row notification types
+
+`queue.mjs`'s `COMBINABLE_TYPES` decides how claimed rows are grouped into
+emails:
+
+- **Combinable** (`new_user_signup`): all of a recipient's rows are collapsed
+  into one email by `renderCombinedEmail`, and marked `sent`/retried together.
+- **Not combinable** (`dive_backup`): each row is its own email, claimed, sent
+  and marked individually. A dive backup carries a JSON + CSV snapshot of the
+  dive as attachments (built in the send path, passed through `sendMail`'s
+  optional `attachments` argument to nodemailer), which a combined email has no
+  way to represent. Its payload is
+  `{ event: "create" | "edit" | "delete", dive: { ...flat column snapshot } }`.
+
+Both the email body and the CSV order columns through `templates.mjs`'s
+`orderedDiveColumns` — known `dives` columns first in a fixed reading order,
+unknown ones appended alphabetically. Postgres normalises jsonb key order on
+write, so the payload's own key order coming back out of the queue is *not* the
+order the server action wrote it in; ordering there instead keeps every backup's
+columns identical. A row whose `notification_type` no renderer handles throws
+rather than being silently marked sent with no email.
 
 ## Tests
 

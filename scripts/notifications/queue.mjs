@@ -1,12 +1,15 @@
 import { sendMail as defaultSendMail } from "../mailer.mjs";
 import {
-  renderBomUploadedSection,
+  orderedDiveColumns,
   renderCombinedEmail,
-  renderFirstCheckSection,
+  renderDiveBackupEmail,
   renderNewUserSignupSection,
-  renderStatusChangeSection,
-  renderTosAcceptanceSection,
 } from "./templates.mjs";
+
+// Types listed here are combined per recipient into one email (the queue's original behaviour).
+// A type left out is sent one row per email: dive_backup opts out because each row carries its own
+// per-dive JSON/CSV attachment, which a combined email has no way to represent.
+const COMBINABLE_TYPES = new Set(["new_user_signup"]);
 
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_GAP_MS = 1_500;
@@ -102,40 +105,96 @@ export async function claimBatch(client, limit) {
   return result.rows;
 }
 
+// Throwing on an unrecognised type is deliberate: an unhandled row used to fall through to an
+// empty section list and get marked sent with no email ever leaving. Failing here routes the row
+// through recordFailure instead, so it retries and eventually dead-letters visibly.
 function buildSections(rows) {
-  const sections = [];
-  const statusChangeGroups = new Map();
+  return rows.map((row) => {
+    if (row.notification_type === "new_user_signup") {
+      return renderNewUserSignupSection(row.payload);
+    }
+    throw new Error(`Unsupported combinable notification_type: ${row.notification_type}`);
+  });
+}
+
+// Groups rows into the units that become one email each: combinable types keep the original
+// per-recipient batching, every other row is its own single-row group. First-seen order is
+// preserved so the inter-send gap still paces sends the way it did before.
+function groupForSending(rows) {
+  const groups = [];
+  const combinableByRecipient = new Map();
 
   for (const row of rows) {
-    const payload = row.payload;
-
-    if (row.notification_type === "bom_uploaded") {
-      sections.push(renderBomUploadedSection(payload));
-    } else if (row.notification_type === "first_check") {
-      sections.push(renderFirstCheckSection(payload));
-    } else if (row.notification_type === "status_change") {
-      // Several item changes on the same file collapse back into one table, matching the
-      // pre-queue per-file status-change email.
-      const group = statusChangeGroups.get(payload.bomFileId) ?? {
-        filename: payload.filename,
-        bomFileId: payload.bomFileId,
-        baseUrl: payload.baseUrl,
-        changes: [],
-      };
-      group.changes.push(payload.change);
-      statusChangeGroups.set(payload.bomFileId, group);
-    } else if (row.notification_type === "tos_acceptance") {
-      sections.push(renderTosAcceptanceSection(payload));
-    } else if (row.notification_type === "new_user_signup") {
-      sections.push(renderNewUserSignupSection(payload));
+    if (!COMBINABLE_TYPES.has(row.notification_type)) {
+      groups.push({ recipient: row.recipient_email, rows: [row] });
+      continue;
     }
+
+    let group = combinableByRecipient.get(row.recipient_email);
+    if (!group) {
+      group = { recipient: row.recipient_email, rows: [] };
+      combinableByRecipient.set(row.recipient_email, group);
+      groups.push(group);
+    }
+    group.rows.push(row);
   }
 
-  for (const group of statusChangeGroups.values()) {
-    sections.push(renderStatusChangeSection(group));
+  return groups;
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+// The dive_backup email's own payload is the backup: JSON for a faithful round-trip (depth
+// profile included), CSV for spreadsheet import. Both are built here, in the send path, because
+// the combined-email renderer has no way to carry per-row attachments.
+function buildDiveBackupAttachments(payload) {
+  const dive = payload?.dive ?? {};
+  const columns = orderedDiveColumns(dive);
+  const baseName = `dive-${dive.id ?? "unknown"}-${payload?.event ?? "change"}`;
+
+  return [
+    {
+      filename: `${baseName}.json`,
+      contentType: "application/json",
+      content: JSON.stringify(payload, null, 2),
+    },
+    {
+      filename: `${baseName}.csv`,
+      contentType: "text/csv",
+      content:
+        `${columns.map(csvCell).join(",")}\n` +
+        `${columns.map((column) => csvCell(dive[column])).join(",")}\n`,
+    },
+  ];
+}
+
+// Renders one group into the sendMail arguments. Non-combinable groups always hold exactly one
+// row (see groupForSending) and render their own complete email plus attachments; combinable
+// groups go through the section/renderCombinedEmail path, which never produces attachments.
+function buildMessage(recipient, rows) {
+  const [row] = rows;
+
+  if (!COMBINABLE_TYPES.has(row.notification_type)) {
+    if (row.notification_type !== "dive_backup") {
+      throw new Error(`Unsupported notification_type: ${row.notification_type}`);
+    }
+
+    const email = renderDiveBackupEmail(row.payload);
+    return {
+      to: recipient,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      attachments: buildDiveBackupAttachments(row.payload),
+    };
   }
 
-  return sections;
+  const email = renderCombinedEmail(buildSections(rows));
+  return { to: recipient, subject: email.subject, html: email.html, text: email.text };
 }
 
 async function markSent(client, rows) {
@@ -204,33 +263,21 @@ export async function processNotificationQueue(client, options = {}) {
   const reaped = await reapStaleLocks(client, staleLockMs, retryBaseMs);
   const claimed = await claimBatch(client, batchSize);
 
-  const byRecipient = new Map();
-  for (const row of claimed) {
-    const list = byRecipient.get(row.recipient_email) ?? [];
-    list.push(row);
-    byRecipient.set(row.recipient_email, list);
-  }
+  const groups = groupForSending(claimed);
 
   let sent = 0;
   let failed = 0;
   let retried = 0;
   let first = true;
 
-  for (const [recipient, rows] of byRecipient) {
+  for (const { recipient, rows } of groups) {
     if (!first) await wait(applyJitter(gapMs));
     first = false;
 
     try {
-      // Render inside the try so a single malformed payload dead-letters its own recipient group
-      // instead of throwing out of the whole batch and stalling every other recipient.
-      const email = renderCombinedEmail(buildSections(rows));
-
-      const result = await sendMail({
-        to: recipient,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
+      // Render inside the try so a single malformed payload dead-letters its own group instead of
+      // throwing out of the whole batch and stalling every other recipient.
+      const result = await sendMail(buildMessage(recipient, rows));
 
       if (result?.sent === false) {
         await resetPending(client, rows);

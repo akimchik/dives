@@ -1,0 +1,54 @@
+name: Build and deploy (dev)
+
+# Adapted from ln's pumpking/.gitea/workflows/deploy.yml reference pattern
+# -- see pumpking/changelog/2026-08-03-onboard-ln-gitea-actions.md for the
+# host-level infra (UFW, TLS SAN, registry mirror auth) this depends on,
+# already in place and shared across every project, not per-repo. dives is
+# in the same Gitea org as ln (software-engineer-vinokurov), so it reuses
+# the org-level REGISTRY_PASSWORD/registryadmin credential directly -- no
+# per-org registry secret needed (unlike idea-146, which is a different org).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        # registry-retention.sh only rotates tags matching this exact
+        # <UTC timestamp>-<sha> pattern -- anything else is silently
+        # excluded from pruning forever.
+        run: echo "tag=$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install kubectl and helm
+        run: |
+          curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x /usr/local/bin/kubectl
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Docker login to pumpking registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login 10.0.1.1:5000 -u registryadmin --password-stdin
+
+      - name: Build and push image
+        run: |
+          docker build -t 10.0.1.1:5000/dives/web:${{ steps.tag.outputs.tag }} .
+          docker push 10.0.1.1:5000/dives/web:${{ steps.tag.outputs.tag }}
+
+      - name: Deploy to dev-dives
+        # dev-values.yaml carries real committed secrets (email_host_password,
+        # DIVES_ADMIN_PASSWORD) so it's .gitignore'd -- the checkout genuinely
+        # doesn't have it. DEV_VALUES_YAML is the whole file, base64-encoded,
+        # same reasoning as KUBECONFIG_DEV below (single-line secret value,
+        # no newlines to escape).
+        run: |
+          echo "${{ secrets.DEV_VALUES_YAML }}" | base64 -d > dev-values.yaml
+          echo "${{ secrets.KUBECONFIG_DEV }}" | base64 -d > /tmp/kubeconfig-dev-dives
+          helm upgrade --install dives ./helm-charts -f dev-values.yaml \
+            --set image.tag=${{ steps.tag.outputs.tag }} \
+            --set deploymentId=${{ steps.tag.outputs.tag }} \
+            -n dev-dives --kubeconfig /tmp/kubeconfig-dev-dives
+          kubectl --kubeconfig /tmp/kubeconfig-dev-dives rollout status deployment/dives -n dev-dives --timeout=120s

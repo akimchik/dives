@@ -31,22 +31,9 @@ afterAll(async () => {
 
 const noSleep = async () => {};
 
-// new_user_signup is the queue's only combinable type (migration 014's constraint list is
-// new_user_signup + dive_backup), so it doubles as the generic fixture for the claim/retry/
-// batching cases below -- none of which care which type they carry.
-function signupPayload(recipient) {
-  return { email: recipient, userNumber: 7 };
-}
-
-async function enqueueSignup(recipient, key) {
-  return enqueueNotification(client, {
-    recipientEmail: recipient,
-    notificationType: "new_user_signup",
-    idempotencyKey: key,
-    payload: signupPayload(recipient),
-  });
-}
-
+// dive_backup is the queue's only notification_type now that new_user_signup was retired (see
+// PROMPTLOG.md) -- it doubles as the generic fixture for the claim/retry/batching cases below,
+// none of which care what the payload actually contains.
 function divePayload(event = "create") {
   return {
     event,
@@ -79,10 +66,10 @@ async function statusOf(id) {
 describe("enqueueNotification idempotency", () => {
   it("inserts exactly one row for a repeated idempotency key", async () => {
     const recipient = `dup-${randomUUID()}@example.com`;
-    const key = `new_user_signup:${randomUUID()}`;
+    const key = `dive-backup:${randomUUID()}`;
 
-    const firstId = await enqueueSignup(recipient, key);
-    const secondId = await enqueueSignup(recipient, key);
+    const firstId = await enqueueDiveBackup(recipient, key);
+    const secondId = await enqueueDiveBackup(recipient, key);
 
     expect(firstId).not.toBeNull();
     expect(secondId).toBeNull();
@@ -98,10 +85,10 @@ describe("enqueueNotification idempotency", () => {
 describe("claimBatch", () => {
   it("marks pending rows sending and excludes sending/sent/failed rows", async () => {
     const recipient = `claim-${randomUUID()}@example.com`;
-    const pendingId = await enqueueSignup(recipient, `pending:${randomUUID()}`);
-    const sentId = await enqueueSignup(recipient, `sent:${randomUUID()}`);
-    const failedId = await enqueueSignup(recipient, `failed:${randomUUID()}`);
-    const sendingId = await enqueueSignup(recipient, `sending:${randomUUID()}`);
+    const pendingId = await enqueueDiveBackup(recipient, `pending:${randomUUID()}`);
+    const sentId = await enqueueDiveBackup(recipient, `sent:${randomUUID()}`);
+    const failedId = await enqueueDiveBackup(recipient, `failed:${randomUUID()}`);
+    const sendingId = await enqueueDiveBackup(recipient, `sending:${randomUUID()}`);
 
     await client.query("update notification_queue set status = 'sent' where id = $1", [sentId]);
     await client.query("update notification_queue set status = 'failed' where id = $1", [failedId]);
@@ -125,7 +112,7 @@ describe("claimBatch", () => {
       const recipient = `race-${randomUUID()}@example.com`;
       const ids = [];
       for (let i = 0; i < 6; i += 1) {
-        ids.push(await enqueueSignup(recipient, `race:${randomUUID()}`));
+        ids.push(await enqueueDiveBackup(recipient, `race:${randomUUID()}`));
       }
 
       const [batchA, batchB] = await Promise.all([
@@ -147,8 +134,8 @@ describe("claimBatch", () => {
 describe("reapStaleLocks", () => {
   it("resets stale sending rows but leaves fresh ones untouched", async () => {
     const recipient = `reap-${randomUUID()}@example.com`;
-    const staleId = await enqueueSignup(recipient, `stale:${randomUUID()}`);
-    const freshId = await enqueueSignup(recipient, `fresh:${randomUUID()}`);
+    const staleId = await enqueueDiveBackup(recipient, `stale:${randomUUID()}`);
+    const freshId = await enqueueDiveBackup(recipient, `fresh:${randomUUID()}`);
 
     await client.query(
       "update notification_queue set status = 'sending', locked_at = now() - interval '20 minutes' where id = $1",
@@ -167,30 +154,9 @@ describe("reapStaleLocks", () => {
 });
 
 describe("processNotificationQueue", () => {
-  it("collapses two same-recipient rows into one send and marks both sent", async () => {
-    const recipient = `combine-${randomUUID()}@example.com`;
-    const idA = await enqueueSignup(recipient, `combine-a:${randomUUID()}`);
-    const idB = await enqueueSignup(recipient, `combine-b:${randomUUID()}`);
-
-    const calls = [];
-    await processNotificationQueue(client, {
-      batchSize: 1000,
-      sleep: noSleep,
-      sendMail: async (message) => {
-        calls.push(message);
-        return { sent: true };
-      },
-    });
-
-    const mine = calls.filter((message) => message.to === recipient);
-    expect(mine).toHaveLength(1);
-    expect((await statusOf(idA)).status).toBe("sent");
-    expect((await statusOf(idB)).status).toBe("sent");
-  });
-
   it("keeps a row pending with an incremented attempt and future retry on a 4xx failure", async () => {
     const recipient = `retry-${randomUUID()}@example.com`;
-    const id = await enqueueSignup(recipient, `retry:${randomUUID()}`);
+    const id = await enqueueDiveBackup(recipient, `retry:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -211,7 +177,7 @@ describe("processNotificationQueue", () => {
 
   it("dead-letters a row immediately on a 5xx failure with no retry", async () => {
     const recipient = `perm-${randomUUID()}@example.com`;
-    const id = await enqueueSignup(recipient, `perm:${randomUUID()}`);
+    const id = await enqueueDiveBackup(recipient, `perm:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -231,7 +197,7 @@ describe("processNotificationQueue", () => {
 
   it("dead-letters a retryable row once attempts reach max_attempts", async () => {
     const recipient = `exhaust-${randomUUID()}@example.com`;
-    const id = await enqueueSignup(recipient, `exhaust:${randomUUID()}`);
+    const id = await enqueueDiveBackup(recipient, `exhaust:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -250,20 +216,26 @@ describe("processNotificationQueue", () => {
     expect(row.attempts).toBe(1);
   });
 
-  // Exercises migration 014's constraint (new_user_signup is an accepted notification_type) and
-  // queue.mjs's buildSections wiring for it end-to-end -- see issue #102.
-  it("sends a new_user_signup row via renderNewUserSignupSection", async () => {
-    const recipient = `admin-${randomUUID()}@example.com`;
+  it("rejects an unrecognised notification_type instead of silently marking it sent", async () => {
+    // Historical rows can still carry the retired new_user_signup type (migration 014's check
+    // constraint was left permissive for them, see lib/notification-queue.ts) -- the worker must
+    // fail loudly on one, not silently drop it.
+    const recipient = `unrecognised-${randomUUID()}@example.com`;
     const id = await enqueueNotification(client, {
       recipientEmail: recipient,
       notificationType: "new_user_signup",
-      idempotencyKey: `new-user-signup:${randomUUID()}`,
-      payload: { email: "new-user@example.com", userNumber: 7 },
+      idempotencyKey: `unrecognised:${randomUUID()}`,
+      payload: { email: recipient, userNumber: 1 },
     });
 
     const calls = [];
     await processNotificationQueue(client, {
       batchSize: 1000,
+      // No responseCode on this error, so classifySmtpError treats it as retryable like a network
+      // blip (see the "dead-letters a retryable row once attempts reach max_attempts" test above)
+      // -- maxAttempts: 1 forces the dead-letter on this first attempt instead of asserting on an
+      // intermediate pending/retry state.
+      maxAttempts: 1,
       sleep: noSleep,
       sendMail: async (message) => {
         calls.push(message);
@@ -271,73 +243,16 @@ describe("processNotificationQueue", () => {
       },
     });
 
-    const mine = calls.filter((message) => message.to === recipient);
-    expect(mine).toHaveLength(1);
-    expect(mine[0].subject).toBe("New user signup: new-user@example.com");
-    expect(mine[0].text).toContain("This is user #7 (excluding test accounts).");
-    expect((await statusOf(id)).status).toBe("sent");
+    expect(calls.filter((message) => message.to === recipient)).toHaveLength(0);
+    const row = await statusOf(id);
+    expect(row.status).toBe("failed");
+    expect(row.last_error).toContain("Unsupported notification_type: new_user_signup");
   });
 });
 
-// dive_backup is the queue's only non-combinable type: each row carries its own per-dive
-// attachments, so it must never be folded into a recipient's combined email (plan step 4).
-describe("processNotificationQueue dive_backup per-row sends", () => {
-  it("sends a dive_backup row on its own while still batching the recipient's combinable rows", async () => {
-    const recipient = `mixed-${randomUUID()}@example.com`;
-    const signupA = await enqueueSignup(recipient, `mixed-signup-a:${randomUUID()}`);
-    const signupB = await enqueueSignup(recipient, `mixed-signup-b:${randomUUID()}`);
-    const backupId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
-
-    const calls = [];
-    await processNotificationQueue(client, {
-      batchSize: 1000,
-      sleep: noSleep,
-      sendMail: async (message) => {
-        calls.push(message);
-        return { sent: true };
-      },
-    });
-
-    const mine = calls.filter((message) => message.to === recipient);
-    expect(mine).toHaveLength(2);
-
-    // (a) Regression: the two new_user_signup rows still collapse into one combined email with no
-    // attachments, exactly as before dive_backup existed.
-    const combined = mine.filter((message) => message.subject === "Dives: 2 updates");
-    expect(combined).toHaveLength(1);
-    expect(combined[0].attachments).toBeUndefined();
-    expect(combined[0].text).toContain("This is user #7 (excluding test accounts).");
-
-    // (b) The dive_backup row is its own email, carrying the JSON + CSV snapshot.
-    const backup = mine.filter((message) => message !== combined[0]);
-    expect(backup).toHaveLength(1);
-    expect(backup[0].subject).toBe("Dive logged: Blue Hole — 2026-08-09T07:30:00.000Z");
-    expect(backup[0].text).toContain("Max depth: 28.40");
-
-    const filenames = backup[0].attachments.map((attachment) => attachment.filename);
-    expect(filenames).toEqual(["dive-4321-create.json", "dive-4321-create.csv"]);
-
-    const json = backup[0].attachments.find((a) => a.filename.endsWith(".json"));
-    expect(json.contentType).toBe("application/json");
-    expect(JSON.parse(json.content)).toEqual(divePayload("create"));
-
-    const csv = backup[0].attachments.find((a) => a.filename.endsWith(".csv"));
-    expect(csv.contentType).toBe("text/csv");
-    const [header, values] = csv.content.trimEnd().split("\n");
-    expect(header).toBe("id,occurred_at,site_name,max_depth,bottom_time_minutes,notes,depth_profile");
-    // A comma/quote-bearing free-text field stays in one properly escaped cell...
-    const scalarCells = '4321,2026-08-09T07:30:00.000Z,Blue Hole,28.40,44,"said ""wow"", twice",';
-    expect(values.startsWith(scalarCells)).toBe(true);
-    // ...and so does the depth profile, as embedded JSON. Postgres normalises jsonb key order, so
-    // this asserts on the parsed value rather than a byte-exact string.
-    const profileCell = values.slice(scalarCells.length);
-    expect(JSON.parse(profileCell.slice(1, -1).replaceAll('""', '"'))).toEqual([{ t: 0, d: 0 }]);
-
-    for (const id of [signupA, signupB, backupId]) {
-      expect((await statusOf(id)).status).toBe("sent");
-    }
-  });
-
+// dive_backup is the queue's only type, and every row sends as its own email (no combining exists
+// any more -- new_user_signup was the only combinable type and was retired, see PROMPTLOG.md).
+describe("processNotificationQueue per-row sends", () => {
   it("never combines two dive_backup rows for the same recipient", async () => {
     const recipient = `two-backups-${randomUUID()}@example.com`;
     const createId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
@@ -364,25 +279,66 @@ describe("processNotificationQueue dive_backup per-row sends", () => {
     expect((await statusOf(editId)).status).toBe("sent");
   });
 
-  it("retries only the failing dive_backup row, leaving the recipient's other rows sent", async () => {
+  it("renders the dive_backup email with its JSON + CSV attachments", async () => {
+    const recipient = `attachments-${randomUUID()}@example.com`;
+    const id = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
+
+    const calls = [];
+    await processNotificationQueue(client, {
+      batchSize: 1000,
+      sleep: noSleep,
+      sendMail: async (message) => {
+        calls.push(message);
+        return { sent: true };
+      },
+    });
+
+    const mine = calls.filter((message) => message.to === recipient);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].subject).toBe("Dive logged: Blue Hole — 2026-08-09T07:30:00.000Z");
+    expect(mine[0].text).toContain("Max depth: 28.40");
+
+    const filenames = mine[0].attachments.map((attachment) => attachment.filename);
+    expect(filenames).toEqual(["dive-4321-create.json", "dive-4321-create.csv"]);
+
+    const json = mine[0].attachments.find((a) => a.filename.endsWith(".json"));
+    expect(json.contentType).toBe("application/json");
+    expect(JSON.parse(json.content)).toEqual(divePayload("create"));
+
+    const csv = mine[0].attachments.find((a) => a.filename.endsWith(".csv"));
+    expect(csv.contentType).toBe("text/csv");
+    const [header, values] = csv.content.trimEnd().split("\n");
+    expect(header).toBe("id,occurred_at,site_name,max_depth,bottom_time_minutes,notes,depth_profile");
+    // A comma/quote-bearing free-text field stays in one properly escaped cell...
+    const scalarCells = '4321,2026-08-09T07:30:00.000Z,Blue Hole,28.40,44,"said ""wow"", twice",';
+    expect(values.startsWith(scalarCells)).toBe(true);
+    // ...and so does the depth profile, as embedded JSON. Postgres normalises jsonb key order, so
+    // this asserts on the parsed value rather than a byte-exact string.
+    const profileCell = values.slice(scalarCells.length);
+    expect(JSON.parse(profileCell.slice(1, -1).replaceAll('""', '"'))).toEqual([{ t: 0, d: 0 }]);
+
+    expect((await statusOf(id)).status).toBe("sent");
+  });
+
+  it("retries only the failing row, leaving the recipient's other row sent", async () => {
     const recipient = `partial-${randomUUID()}@example.com`;
-    const signupId = await enqueueSignup(recipient, `partial-signup:${randomUUID()}`);
-    const backupId = await enqueueDiveBackup(recipient, `dive-backup:4321:create:${randomUUID()}`);
+    const okId = await enqueueDiveBackup(recipient, `partial-ok:${randomUUID()}`, "create");
+    const failingId = await enqueueDiveBackup(recipient, `partial-fail:${randomUUID()}`, "edit");
 
     await processNotificationQueue(client, {
       batchSize: 1000,
       sleep: noSleep,
       sendMail: async (message) => {
-        if (message.to === recipient && message.attachments) {
+        if (message.to === recipient && message.subject.startsWith("Dive updated")) {
           throw Object.assign(new Error("greylisted"), { responseCode: 450 });
         }
         return { sent: true };
       },
     });
 
-    expect((await statusOf(signupId)).status).toBe("sent");
-    const backup = await statusOf(backupId);
-    expect(backup.status).toBe("pending");
-    expect(backup.attempts).toBe(1);
+    expect((await statusOf(okId)).status).toBe("sent");
+    const failing = await statusOf(failingId);
+    expect(failing.status).toBe("pending");
+    expect(failing.attempts).toBe(1);
   });
 });

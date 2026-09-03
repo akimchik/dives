@@ -4,9 +4,10 @@ import type { PoolClient } from "pg";
 
 import { getPool } from "./db";
 
-// Must stay in sync with migrations/014_notification_queue.sql's notification_type check
-// constraint — an insert with a value outside this list is rejected by the database.
-type NotificationType = "new_user_signup" | "dive_backup";
+// Must stay in sync with scripts/notifications/queue.mjs's buildMessage, which only knows how to
+// send this type -- migration 014's check constraint still permits the retired "new_user_signup"
+// for historical rows, but nothing must ever enqueue one again.
+type NotificationType = "dive_backup";
 
 export type EnqueueNotificationInput = {
   recipientEmail: string;

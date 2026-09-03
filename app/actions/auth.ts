@@ -11,7 +11,6 @@ import { sendMagicLinkEmail } from "@/lib/mailer";
 import { safeRedirectPath } from "@/lib/safe-redirect";
 import { createSession, deleteSession } from "@/lib/session";
 import { createUser, findActiveUserByEmail } from "@/lib/users";
-import { notifyNewUserSignup } from "@/lib/user-signup-notification";
 import { verifyPassword } from "@/lib/passwords";
 import { recordSignup, recordSignin, recordLogout } from "@/lib/auth-otel";
 
@@ -147,7 +146,6 @@ export async function completeRegistrationAction(
   }
 
   recordSignup("password");
-  await notifyNewUserSignup({ email: user.email });
   await createSession(user.id);
   recordSignin("password");
   redirect(safeRedirectPath(nextPath));

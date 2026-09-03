@@ -50,27 +50,6 @@ function toUser(row: UserRow): AppUser {
   };
 }
 
-// Manual QA/staging accounts follow AGENTS.md's "test*@aleksandr.vin" convention -- excluded
-// from the new-signup admin notification and its running count so the count reflects real
-// growth, not our own QA activity.
-const TEST_USER_EMAIL_PATTERN = /^test[^@]*@aleksandr\.vin$/i;
-
-export function isTestUserEmail(email: string) {
-  return TEST_USER_EMAIL_PATTERN.test(normalizeEmail(email));
-}
-
-export async function countNonTestUsers(): Promise<number> {
-  const result = await queryRead<{ count: string }>(
-    `
-      select count(*) as count
-      from users
-      where email !~* '^test[^@]*@aleksandr\\.vin$'
-    `,
-  );
-
-  return Number(result.rows[0]?.count ?? 0);
-}
-
 export async function findActiveUserByEmail(email: string) {
   const result = await queryRead<UserRow>(
     `

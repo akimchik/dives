@@ -1,15 +1,5 @@
 import { sendMail as defaultSendMail } from "../mailer.mjs";
-import {
-  orderedDiveColumns,
-  renderCombinedEmail,
-  renderDiveBackupEmail,
-  renderNewUserSignupSection,
-} from "./templates.mjs";
-
-// Types listed here are combined per recipient into one email (the queue's original behaviour).
-// A type left out is sent one row per email: dive_backup opts out because each row carries its own
-// per-dive JSON/CSV attachment, which a combined email has no way to represent.
-const COMBINABLE_TYPES = new Set(["new_user_signup"]);
+import { orderedDiveColumns, renderDiveBackupEmail } from "./templates.mjs";
 
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_GAP_MS = 1_500;
@@ -105,43 +95,6 @@ export async function claimBatch(client, limit) {
   return result.rows;
 }
 
-// Throwing on an unrecognised type is deliberate: an unhandled row used to fall through to an
-// empty section list and get marked sent with no email ever leaving. Failing here routes the row
-// through recordFailure instead, so it retries and eventually dead-letters visibly.
-function buildSections(rows) {
-  return rows.map((row) => {
-    if (row.notification_type === "new_user_signup") {
-      return renderNewUserSignupSection(row.payload);
-    }
-    throw new Error(`Unsupported combinable notification_type: ${row.notification_type}`);
-  });
-}
-
-// Groups rows into the units that become one email each: combinable types keep the original
-// per-recipient batching, every other row is its own single-row group. First-seen order is
-// preserved so the inter-send gap still paces sends the way it did before.
-function groupForSending(rows) {
-  const groups = [];
-  const combinableByRecipient = new Map();
-
-  for (const row of rows) {
-    if (!COMBINABLE_TYPES.has(row.notification_type)) {
-      groups.push({ recipient: row.recipient_email, rows: [row] });
-      continue;
-    }
-
-    let group = combinableByRecipient.get(row.recipient_email);
-    if (!group) {
-      group = { recipient: row.recipient_email, rows: [] };
-      combinableByRecipient.set(row.recipient_email, group);
-      groups.push(group);
-    }
-    group.rows.push(row);
-  }
-
-  return groups;
-}
-
 function csvCell(value) {
   if (value === null || value === undefined) return "";
   const text = typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -172,29 +125,22 @@ function buildDiveBackupAttachments(payload) {
   ];
 }
 
-// Renders one group into the sendMail arguments. Non-combinable groups always hold exactly one
-// row (see groupForSending) and render their own complete email plus attachments; combinable
-// groups go through the section/renderCombinedEmail path, which never produces attachments.
-function buildMessage(recipient, rows) {
-  const [row] = rows;
-
-  if (!COMBINABLE_TYPES.has(row.notification_type)) {
-    if (row.notification_type !== "dive_backup") {
-      throw new Error(`Unsupported notification_type: ${row.notification_type}`);
-    }
-
-    const email = renderDiveBackupEmail(row.payload);
-    return {
-      to: recipient,
-      subject: email.subject,
-      html: email.html,
-      text: email.text,
-      attachments: buildDiveBackupAttachments(row.payload),
-    };
+// Throwing on an unrecognised type is deliberate: an unhandled row silently marked sent with no
+// email ever leaving is worse than a visible failure. Routes through recordFailure so it retries
+// and eventually dead-letters visibly instead.
+function buildMessage(row) {
+  if (row.notification_type !== "dive_backup") {
+    throw new Error(`Unsupported notification_type: ${row.notification_type}`);
   }
 
-  const email = renderCombinedEmail(buildSections(rows));
-  return { to: recipient, subject: email.subject, html: email.html, text: email.text };
+  const email = renderDiveBackupEmail(row.payload);
+  return {
+    to: row.recipient_email,
+    subject: email.subject,
+    html: email.html,
+    text: email.text,
+    attachments: buildDiveBackupAttachments(row.payload),
+  };
 }
 
 async function markSent(client, rows) {
@@ -263,32 +209,33 @@ export async function processNotificationQueue(client, options = {}) {
   const reaped = await reapStaleLocks(client, staleLockMs, retryBaseMs);
   const claimed = await claimBatch(client, batchSize);
 
-  const groups = groupForSending(claimed);
-
   let sent = 0;
   let failed = 0;
   let retried = 0;
   let first = true;
 
-  for (const { recipient, rows } of groups) {
+  // One row, one email, one send -- dive_backup (the only type left) carries its own per-dive
+  // attachment, so there's nothing to batch per recipient the way the retired combinable types
+  // (new_user_signup) used to.
+  for (const row of claimed) {
     if (!first) await wait(applyJitter(gapMs));
     first = false;
 
     try {
-      // Render inside the try so a single malformed payload dead-letters its own group instead of
-      // throwing out of the whole batch and stalling every other recipient.
-      const result = await sendMail(buildMessage(recipient, rows));
+      // Render inside the try so a single malformed payload dead-letters its own row instead of
+      // throwing out of the whole batch and stalling every other row.
+      const result = await sendMail(buildMessage(row));
 
       if (result?.sent === false) {
-        await resetPending(client, rows);
+        await resetPending(client, [row]);
         continue;
       }
 
-      await markSent(client, rows);
-      sent += rows.length;
+      await markSent(client, [row]);
+      sent += 1;
     } catch (error) {
       const classification = classifySmtpError(error);
-      const outcome = await recordFailure(client, rows, error, classification, {
+      const outcome = await recordFailure(client, [row], error, classification, {
         retryBaseMs,
         maxBackoffMs,
         maxAttempts,

@@ -8,7 +8,6 @@ import { getOidcConfig, OIDC_FLOW_COOKIE_NAME, requireEnv, type OidcFlowState } 
 import { safeRedirectPath } from "@/lib/safe-redirect";
 import { issueSession } from "@/lib/session";
 import { findOrCreateOidcUser } from "@/lib/users";
-import { notifyNewUserSignup } from "@/lib/user-signup-notification";
 import { recordSignup, recordSignin } from "@/lib/auth-otel";
 
 function loginFailedRedirect() {
@@ -71,7 +70,6 @@ export async function GET(request: Request) {
     const { user, created } = await findOrCreateOidcUser(sub, email, isAdmin);
     if (created) {
       recordSignup("oidc");
-      await notifyNewUserSignup({ email: user.email });
     }
     // Stored so logoutAction can later use it as the id_token_hint for
     // RP-initiated logout -- see lib/session.ts's issueSession.

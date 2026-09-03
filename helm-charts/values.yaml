@@ -32,7 +32,14 @@ env:
   # a selector-less Service (pumpking/manifests/host-services.yaml). No
   # sslmode param: that instance has no TLS configured at all, so requesting
   # TLS would fail the handshake outright rather than downgrade gracefully.
-  DATABASE_URL: "postgres://postgres.data.svc.cluster.local:5432/dev_dives"
+  # The path segment IS the real database name (lib/database-url.ts splices
+  # DATABASE_USER/DATABASE_PASSWORD from the secret into this URL rather than
+  # deriving the dbname from anywhere else) -- add-new-project's `databases`
+  # param was called with name: "dives" (not "dev_dives", the idea-146
+  # naming convention this originally mirrored), and the reconciler's
+  # Terraform creates the Postgres database under that literal name
+  # (confirmed: dives-db-credentials' `dbname` key is 5 bytes == "dives").
+  DATABASE_URL: "postgres://postgres.data.svc.cluster.local:5432/dives"
   # HEALTHCHECK_PING_URL: "https://healthchecks.aleksandr.vin/ping/..."
   HEALTHCHECK_PING_INTERVAL_SECONDS: "60"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-opentelemetry-collector.default.svc.cluster.local:4317"

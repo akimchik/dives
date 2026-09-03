@@ -167,7 +167,17 @@ test.describe("dive logbook", () => {
     await expect(page.getByLabel("Buddy / dive guide")).toHaveValue("Sam Okafor");
     await expect(page.getByLabel("Depth profile", { exact: true })).toHaveValue(PROFILE_CSV);
 
-    await page.getByLabel("Max depth (m)").fill("31.2");
+    // First interaction on this freshly-loaded page -- same hydration race as
+    // fillSiteAndAwaitHydration above (a single fill() event can be dropped if it lands before
+    // React attaches its onChange listener, and unlike the /new form's create-site button there's
+    // no JS-derived state here to prove hydration first). pressSequentially spans real keystrokes
+    // over time instead of one atomic event, so it can't be silently lost the same way. Every field
+    // after this one is safe, per the same reasoning as fillSiteAndAwaitHydration.
+    const maxDepthInput = page.getByLabel("Max depth (m)");
+    await maxDepthInput.click({ clickCount: 3 });
+    await maxDepthInput.pressSequentially("31.2");
+    await expect(maxDepthInput).toHaveValue("31.2");
+
     await page.getByLabel("Bottom time (min)").fill("52");
     await page.getByRole("button", { name: "Save changes" }).click();
 

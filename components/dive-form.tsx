@@ -305,10 +305,12 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
       }
 
       toast.success(dive ? "Dive updated." : "Dive logged.");
-      router.push(`/dives/${result.id}`);
-      // Server Components for the destination are cached per navigation; without this the detail
-      // page can render the pre-edit snapshot.
+      // refresh() must come BEFORE push(): it invalidates the client Router Cache, so the
+      // navigation that follows is forced to fetch fresh data instead of serving a snapshot of
+      // this route already cached from earlier in the session (push-then-refresh raced on this --
+      // push could resolve from the stale cache before refresh got a chance to invalidate it).
       router.refresh();
+      router.push(`/dives/${result.id}`);
     });
   }
 

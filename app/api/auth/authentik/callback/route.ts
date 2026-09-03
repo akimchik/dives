@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { getOidcConfig, OIDC_FLOW_COOKIE_NAME, requireEnv, type OidcFlowState } from "@/lib/auth/oidc";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 import { issueSession } from "@/lib/session";
 import { findOrCreateOidcUser } from "@/lib/users";
 import { notifyNewUserSignup } from "@/lib/user-signup-notification";
@@ -77,7 +78,9 @@ export async function GET(request: Request) {
     const session = await issueSession(user.id, tokens.id_token);
     recordSignin("oidc");
 
-    const response = NextResponse.redirect(new URL("/dashboard", requireEnv("NEXT_PUBLIC_BASE_URL")));
+    const response = NextResponse.redirect(
+      new URL(safeRedirectPath(flowState.next), requireEnv("NEXT_PUBLIC_BASE_URL")),
+    );
     response.cookies.set(session.cookieName, session.token, session.options);
 
     return response;

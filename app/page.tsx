@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { ModeToggle } from "@/components/mode-toggle";
 import { isPasswordAuthEnabled } from "@/lib/auth-config";
+import { resolveHomeRedirect } from "@/lib/home-redirect";
 import { getOptionalUser } from "@/lib/session";
 
 type HomePageProps = {
@@ -30,6 +31,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const next = Array.isArray(params?.next) ? params.next[0] : params?.next;
   const error = Array.isArray(params?.error) ? params.error[0] : params?.error;
   const passwordAuthEnabled = isPasswordAuthEnabled();
+
+  const homeRedirect = resolveHomeRedirect({ passwordAuthEnabled, next, error });
+  if (homeRedirect) redirect(homeRedirect);
 
   return (
     <main className="mx-auto flex min-h-svh max-w-md flex-col justify-center gap-6 px-6 py-16">

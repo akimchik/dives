@@ -4,8 +4,6 @@ import * as client from "openid-client";
 
 export const OIDC_FLOW_COOKIE_NAME = "dives_oidc_flow";
 const OIDC_CALLBACK_PATH = "/api/auth/authentik/callback";
-// pumpking's authentik.tf: authentik_flow.brand_enrollment["dives"].slug.
-export const ENROLLMENT_FLOW_SLUG = "dives-enrollment";
 
 // Discovery hits Authentik's .well-known endpoint, so it's cached on a
 // module-level promise rather than re-fetched on every login attempt.
@@ -34,13 +32,15 @@ export type OidcFlowState = {
   codeVerifier: string;
   state: string;
   nonce: string;
+  // Where to send the browser after a successful login -- carried through
+  // Authentik's own redirect round-trip via this server-side cookie (not a
+  // URL param Authentik would need to echo back), read by the callback
+  // route via safeRedirectPath so an already-validated relative path is the
+  // only thing ever stored here.
+  next?: string;
 };
 
-// Shared between the plain sign-in route and the sign-up route, which
-// wraps this same authorizationUrl behind Authentik's enrollment flow
-// instead of returning it directly -- both need identical PKCE/state/
-// nonce handling.
-export async function buildAuthentikAuthorizationRequest() {
+export async function buildAuthentikAuthorizationRequest(next?: string) {
   const config = await getOidcConfig();
 
   const codeVerifier = client.randomPKCECodeVerifier();
@@ -68,7 +68,7 @@ export async function buildAuthentikAuthorizationRequest() {
     nonce,
   });
 
-  const flowState: OidcFlowState = { codeVerifier, state, nonce };
+  const flowState: OidcFlowState = { codeVerifier, state, nonce, next };
 
   return { authorizationUrl, flowState };
 }

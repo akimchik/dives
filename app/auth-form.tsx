@@ -44,6 +44,7 @@ export function AuthForm({
   const [loginState, loginFormAction] = useActionState(loginAction, initialLoginState);
 
   const normalizedEmail = useMemo(() => email.trim(), [email]);
+  const authentikHref = next ? `/api/auth/authentik?next=${encodeURIComponent(next)}` : "/api/auth/authentik";
 
   useEffect(() => {
     if (loginState.error) {
@@ -87,13 +88,11 @@ export function AuthForm({
   if (!passwordAuthEnabled) {
     return (
       <div className="flex flex-col gap-3">
-        {/* Plain <a>s, not next/link: these hit Route Handlers that
-            redirect off-site to Authentik, not internal pages. */}
-        <a href="/api/auth/authentik" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+        {/* Plain <a>, not next/link: this hits a Route Handler that redirects
+            off-site to Authentik, not an internal page. No sign-up option --
+            accounts are provisioned invite-only via pumpking, not self-serve. */}
+        <a href={authentikHref} className={cn(buttonVariants({ variant: "default" }), "w-full")}>
           Sign in
-        </a>
-        <a href="/api/auth/authentik/signup" className={cn(buttonVariants({ variant: "default" }), "w-full")}>
-          Sign up
         </a>
       </div>
     );
@@ -157,7 +156,7 @@ export function AuthForm({
     <div className="flex flex-col gap-6">
       {/* Plain <a>, not next/link: this hits a Route Handler that redirects
           off-site to Authentik, not an internal page. */}
-      <a href="/api/auth/authentik" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
+      <a href={authentikHref} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
         Sign in with Authentik
       </a>
       <div className="flex items-center gap-3 text-muted-foreground text-sm">

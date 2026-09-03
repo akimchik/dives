@@ -8,6 +8,7 @@ import { getOidcConfig, requireEnv } from "@/lib/auth/oidc";
 import { getRequestOrigin } from "@/lib/base-url";
 import { createMagicLinkToken, consumeMagicLinkToken } from "@/lib/magic-link";
 import { sendMagicLinkEmail } from "@/lib/mailer";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 import { createSession, deleteSession } from "@/lib/session";
 import { createUser, findActiveUserByEmail } from "@/lib/users";
 import { notifyNewUserSignup } from "@/lib/user-signup-notification";
@@ -27,13 +28,6 @@ function readCredentials(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const next = String(formData.get("next") ?? "").trim();
   return { email, password, next };
-}
-
-function safeRedirectPath(nextPath?: string | null) {
-  if (!nextPath) return "/dashboard";
-  if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return "/dashboard";
-
-  return nextPath;
 }
 
 function isUniqueConstraintError(error: unknown) {

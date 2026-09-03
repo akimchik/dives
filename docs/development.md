@@ -80,6 +80,33 @@ ordinary CRUD on every table, plus `ALTER DEFAULT PRIVILEGES` so future
 migrations' tables inherit the same grant automatically. **No per-table grant
 migration is ever needed for a new table.**
 
+## Dive logbook data access
+
+`lib/dives.ts` holds every dive/dive-site query, and `app/actions/dives.ts` the
+`"use server"` wrappers the UI calls (`createDiveAction`, `updateDiveAction`,
+`deleteDiveAction`, plus `searchDiveSitesAction`/`createDiveSiteAction` for the
+site autocomplete). Every function there takes the session user's id — resolved
+by `requireUser()` in the action, never from a URL or form field — and filters on
+it. A dive or site id belonging to someone else matches no row: reads return
+`null`/an empty list, mutations throw `DiveNotFoundError`/`DiveSiteNotFoundError`,
+so cross-user access is always not-found and never a partial write.
+
+Each mutation runs as one transaction (`getPool().connect()` → `begin` → write →
+`commit`, released in a `finally`) that also resolves the dive site
+(create-or-reuse by name, so a rolled-back dive leaves no orphan site) and
+enqueues the `dive_backup` notification through
+`enqueueNotification(..., { client })`. The dive row and its backup email can
+therefore never exist without each other. Deletes snapshot the dive *before*
+removing it, since the worker draining the queue later has no row left to read.
+
+The enqueued payload is the flat
+`{ event, dive: { ...columns, site_name, site_location, site_lat, site_lng } }`
+contract the worker's renderer expects (see "Combinable vs per-row notification
+types" below) — the site is flattened into `site_*` keys rather than nested,
+because the CSV attachment writes one cell per key. Each enqueue mints its own
+`dive-backup:<id>:<event>:<uuid>` idempotency key, so two consecutive edits of the
+same dive produce two outbox rows instead of collapsing into one.
+
 ## Run the app
 
 ```sh

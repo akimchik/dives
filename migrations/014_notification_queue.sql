@@ -1,7 +1,7 @@
 create table notification_queue (
   id bigserial primary key,
   recipient_email text not null,
-  notification_type text not null check (notification_type in ('bom_uploaded', 'first_check', 'status_change')),
+  notification_type text not null check (notification_type in ('new_user_signup', 'dive_backup')),
   idempotency_key text not null unique,
   payload jsonb not null,
   status text not null default 'pending' check (status in ('pending', 'sending', 'sent', 'failed')),

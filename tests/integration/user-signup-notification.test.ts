@@ -5,8 +5,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 // Integration test against a real Postgres (helpers/pg.ts's convention: resolve
 // TEST_DATABASE_URL ?? DATABASE_URL, fail loudly rather than silently skipping). Covers issue
 // #102's new_user_signup notification: countNonTestUsers/isTestUserEmail (lib/users.ts) and the
-// enqueue gate in lib/user-signup-notification.ts, including the migration
-// 021_notification_queue_new_user_signup_type.sql constraint actually accepting the new type.
+// enqueue gate in lib/user-signup-notification.ts, including migration
+// 014_notification_queue.sql's notification_type constraint actually accepting the type.
 import { closeTestPool, getTestPool } from "./helpers/pg";
 
 const { countNonTestUsers } = await import("@/lib/users");

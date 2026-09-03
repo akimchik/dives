@@ -44,11 +44,35 @@ filenames so the numbers still line up with the template they came from:
 | `014_notification_queue.sql` | `notification_queue` outbox |
 | `016_oidc_users.sql` | Authentik columns on `users` (`oidc_subject`, `is_admin`) |
 | `017_session_id_token.sql` | `user_sessions.id_token`, for RP-initiated logout |
+| `018_dive_sites.sql` | `dive_sites` (Dives) |
+| `019_dives.sql` | `dives` (Dives) |
 
-The gaps (002, 005–013, 015, 018–022) are the template's BOM/nexar/catfooder
-and `tos_acceptance` migrations, deliberately never ported. Nothing is missing;
-do not try to "fill in" those numbers. New Dives migrations continue from the
-highest number present.
+The gaps (002, 005–013, 015) are the template's BOM/nexar/catfooder migrations,
+deliberately never ported, as are the template's own 018–022 (`tos_acceptance`
+and its follow-up `notification_type` constraint alters). Nothing is missing; do
+not try to "fill in" those numbers. New Dives migrations continue from the
+highest number present — `018`/`019` above are Dives' own tables, not the
+template's.
+
+### `notification_queue.notification_type`
+
+`014_notification_queue.sql` is the template's file with one hand-edit: its
+`notification_type` check constraint lists exactly the types this app enqueues —
+`new_user_signup` (the Authentik signup callback, `lib/user-signup-notification.ts`)
+and `dive_backup` (every dive create/edit/delete). The template's BOM/ToS types
+(`bom_uploaded`, `first_check`, `status_change`, `tos_acceptance`) are gone along
+with the features that enqueued them, and the template's `019`/`021` follow-up
+migrations — which only `alter` that constraint on an already-live table — were
+not ported. Adding a new notification type means editing this constraint list;
+there is no live deployment to `alter` yet.
+
+### Dive tables
+
+`dive_sites` and `dives` are both owned per user: `user_id integer not null
+references users (id) on delete cascade`, with a leading-`user_id` index on each
+so every query can be (and must be) filtered by the session's user. `dives.dive_site_id`
+is nullable and `on delete set null` — deleting a site never deletes the dives
+logged at it.
 
 `scripts/db-migrate.mjs`'s `grantAppRoleOperationalAccess` runs after every
 migration batch and grants the low-privilege runtime role (`APP_DB_ROLE`)

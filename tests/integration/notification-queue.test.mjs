@@ -31,21 +31,19 @@ afterAll(async () => {
 
 const noSleep = async () => {};
 
-function uploadPayload(recipient) {
-  return {
-    filename: `bom-${recipient}.csv`,
-    bomFileUrl: "https://dives.aleksandr.vin/dashboard/bom/1",
-    itemCount: 2,
-    manufacturerCounts: { Acme: 2 },
-  };
+// new_user_signup is the queue's only combinable type (migration 014's constraint list is
+// new_user_signup + dive_backup), so it doubles as the generic fixture for the claim/retry/
+// batching cases below -- none of which care which type they carry.
+function signupPayload(recipient) {
+  return { email: recipient, userNumber: 7 };
 }
 
-async function enqueueUpload(recipient, key) {
+async function enqueueSignup(recipient, key) {
   return enqueueNotification(client, {
     recipientEmail: recipient,
-    notificationType: "bom_uploaded",
+    notificationType: "new_user_signup",
     idempotencyKey: key,
-    payload: uploadPayload(recipient),
+    payload: signupPayload(recipient),
   });
 }
 
@@ -57,10 +55,10 @@ async function statusOf(id) {
 describe("enqueueNotification idempotency", () => {
   it("inserts exactly one row for a repeated idempotency key", async () => {
     const recipient = `dup-${randomUUID()}@example.com`;
-    const key = `bom_uploaded:${randomUUID()}`;
+    const key = `new_user_signup:${randomUUID()}`;
 
-    const firstId = await enqueueUpload(recipient, key);
-    const secondId = await enqueueUpload(recipient, key);
+    const firstId = await enqueueSignup(recipient, key);
+    const secondId = await enqueueSignup(recipient, key);
 
     expect(firstId).not.toBeNull();
     expect(secondId).toBeNull();
@@ -76,10 +74,10 @@ describe("enqueueNotification idempotency", () => {
 describe("claimBatch", () => {
   it("marks pending rows sending and excludes sending/sent/failed rows", async () => {
     const recipient = `claim-${randomUUID()}@example.com`;
-    const pendingId = await enqueueUpload(recipient, `pending:${randomUUID()}`);
-    const sentId = await enqueueUpload(recipient, `sent:${randomUUID()}`);
-    const failedId = await enqueueUpload(recipient, `failed:${randomUUID()}`);
-    const sendingId = await enqueueUpload(recipient, `sending:${randomUUID()}`);
+    const pendingId = await enqueueSignup(recipient, `pending:${randomUUID()}`);
+    const sentId = await enqueueSignup(recipient, `sent:${randomUUID()}`);
+    const failedId = await enqueueSignup(recipient, `failed:${randomUUID()}`);
+    const sendingId = await enqueueSignup(recipient, `sending:${randomUUID()}`);
 
     await client.query("update notification_queue set status = 'sent' where id = $1", [sentId]);
     await client.query("update notification_queue set status = 'failed' where id = $1", [failedId]);
@@ -103,7 +101,7 @@ describe("claimBatch", () => {
       const recipient = `race-${randomUUID()}@example.com`;
       const ids = [];
       for (let i = 0; i < 6; i += 1) {
-        ids.push(await enqueueUpload(recipient, `race:${randomUUID()}`));
+        ids.push(await enqueueSignup(recipient, `race:${randomUUID()}`));
       }
 
       const [batchA, batchB] = await Promise.all([
@@ -125,8 +123,8 @@ describe("claimBatch", () => {
 describe("reapStaleLocks", () => {
   it("resets stale sending rows but leaves fresh ones untouched", async () => {
     const recipient = `reap-${randomUUID()}@example.com`;
-    const staleId = await enqueueUpload(recipient, `stale:${randomUUID()}`);
-    const freshId = await enqueueUpload(recipient, `fresh:${randomUUID()}`);
+    const staleId = await enqueueSignup(recipient, `stale:${randomUUID()}`);
+    const freshId = await enqueueSignup(recipient, `fresh:${randomUUID()}`);
 
     await client.query(
       "update notification_queue set status = 'sending', locked_at = now() - interval '20 minutes' where id = $1",
@@ -147,8 +145,8 @@ describe("reapStaleLocks", () => {
 describe("processNotificationQueue", () => {
   it("collapses two same-recipient rows into one send and marks both sent", async () => {
     const recipient = `combine-${randomUUID()}@example.com`;
-    const idA = await enqueueUpload(recipient, `combine-a:${randomUUID()}`);
-    const idB = await enqueueUpload(recipient, `combine-b:${randomUUID()}`);
+    const idA = await enqueueSignup(recipient, `combine-a:${randomUUID()}`);
+    const idB = await enqueueSignup(recipient, `combine-b:${randomUUID()}`);
 
     const calls = [];
     await processNotificationQueue(client, {
@@ -168,7 +166,7 @@ describe("processNotificationQueue", () => {
 
   it("keeps a row pending with an incremented attempt and future retry on a 4xx failure", async () => {
     const recipient = `retry-${randomUUID()}@example.com`;
-    const id = await enqueueUpload(recipient, `retry:${randomUUID()}`);
+    const id = await enqueueSignup(recipient, `retry:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -189,7 +187,7 @@ describe("processNotificationQueue", () => {
 
   it("dead-letters a row immediately on a 5xx failure with no retry", async () => {
     const recipient = `perm-${randomUUID()}@example.com`;
-    const id = await enqueueUpload(recipient, `perm:${randomUUID()}`);
+    const id = await enqueueSignup(recipient, `perm:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -209,7 +207,7 @@ describe("processNotificationQueue", () => {
 
   it("dead-letters a retryable row once attempts reach max_attempts", async () => {
     const recipient = `exhaust-${randomUUID()}@example.com`;
-    const id = await enqueueUpload(recipient, `exhaust:${randomUUID()}`);
+    const id = await enqueueSignup(recipient, `exhaust:${randomUUID()}`);
 
     await processNotificationQueue(client, {
       batchSize: 1000,
@@ -228,7 +226,7 @@ describe("processNotificationQueue", () => {
     expect(row.attempts).toBe(1);
   });
 
-  // Exercises migration 021's constraint (new_user_signup is an accepted notification_type) and
+  // Exercises migration 014's constraint (new_user_signup is an accepted notification_type) and
   // queue.mjs's buildSections wiring for it end-to-end -- see issue #102.
   it("sends a new_user_signup row via renderNewUserSignupSection", async () => {
     const recipient = `admin-${randomUUID()}@example.com`;

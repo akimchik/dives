@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { Check, Loader2, MapPin, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,6 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { DiveSiteRow } from "@/lib/dives";
 import { cn } from "@/lib/utils";
+
+// Leaflet touches window/document at module load, so it can never run during SSR -- dynamic +
+// ssr:false defers loading it until the browser actually renders this.
+const DiveSiteMap = dynamic(
+  () => import("@/components/dive-site-map").then((mod) => mod.DiveSiteMap),
+  { ssr: false, loading: () => <div className="h-[180px] animate-pulse rounded-md border border-border bg-muted" /> },
+);
 
 // The form holds the raw field state; `toSiteSelection` below turns it into the shape
 // `DiveInput.site` expects. Keeping the id and the typed name side by side is what lets a user
@@ -213,15 +221,20 @@ export function DiveSiteField({
       </div>
 
       {isResolved ? (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>
-            Using saved site
-            {value.location ? ` · ${value.location}` : ""}
-            {value.lat && value.lng ? ` · ${value.lat}, ${value.lng}` : ""}
-          </span>
-          <Button type="button" variant="ghost" size="sm" onClick={clear}>
-            <X /> Change
-          </Button>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              Using saved site
+              {value.location ? ` · ${value.location}` : ""}
+              {value.lat && value.lng ? ` · ${value.lat}, ${value.lng}` : ""}
+            </span>
+            <Button type="button" variant="ghost" size="sm" onClick={clear}>
+              <X /> Change
+            </Button>
+          </div>
+          {optionalNumber(value.lat) !== null && optionalNumber(value.lng) !== null ? (
+            <DiveSiteMap lat={optionalNumber(value.lat)} lng={optionalNumber(value.lng)} height={160} />
+          ) : null}
         </div>
       ) : (
         // Details for a site that doesn't exist yet. Left visible (rather than behind a toggle) so
@@ -254,6 +267,16 @@ export function DiveSiteField({
               placeholder="34.5136"
               value={value.lng}
               onChange={(event) => onChange({ ...value, lng: event.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 sm:col-span-3">
+            <Label>Location on map</Label>
+            <DiveSiteMap
+              lat={optionalNumber(value.lat)}
+              lng={optionalNumber(value.lng)}
+              onPick={(lat, lng) =>
+                onChange({ ...value, lat: lat.toFixed(6), lng: lng.toFixed(6) })
+              }
             />
           </div>
           <div className="flex items-end sm:col-span-3">

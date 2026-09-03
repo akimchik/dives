@@ -41,24 +41,41 @@ async function createOwner(): Promise<Owner> {
   return { id: String(result.rows[0].id), email };
 }
 
+// pg throws on an `undefined` query param (unlike `null`, which is fine) -- every DiveInput field
+// must be explicitly present here, even the ones this file doesn't otherwise care about, or
+// createDive/updateDive fail at the database call, not at the type-check (the `as` cast below
+// doesn't catch a field being merely absent from the object literal).
 function diveInput(overrides: Record<string, unknown> = {}) {
   return {
     site: null,
+    title: null,
     occurredAt: "2026-08-09T07:30:00.000Z",
     maxDepth: 30.5,
     avgDepth: 18.25,
     bottomTimeMinutes: 44,
     waterTemp: 26.5,
+    waterTempLow: null,
+    airTemp: null,
     visibility: 20,
     gasMix: "EAN32",
     tankInfo: "12L steel",
+    cylinderSize: null,
+    startPressure: null,
+    endPressure: null,
     weight: 6,
+    weightFeedback: null,
     suitType: "3mm shorty",
+    hood: null,
+    gloves: null,
+    boots: null,
     buddy: "Sam",
     diveShop: "Blue Bubble Divers",
     current: "mild",
     surge: "none",
+    waves: null,
     weather: "sunny",
+    waterType: null,
+    bodyOfWater: null,
     entryType: "boat",
     notes: 'said "wow", twice',
     rating: 5,
@@ -159,6 +176,56 @@ describe("dive mutations enqueue a dive_backup notification in the same transact
     expect(columns).toContain("site_name");
     expect(columns).toContain("site_location");
     expect(columns[0]).toBe("id");
+  });
+
+  it("round-trips the extended TODO.md fields (title, gas pressures, gear, conditions)", async () => {
+    const owner = await createOwner();
+
+    const dive = await createDive(
+      owner,
+      diveInput({
+        title: "Night dive with the reef sharks",
+        waterTempLow: 21.0,
+        airTemp: 29.5,
+        cylinderSize: 12,
+        startPressure: 200,
+        endPressure: 50,
+        weightFeedback: "Perfect",
+        hood: true,
+        gloves: false,
+        boots: true,
+        waves: "Mild",
+        waterType: "Salt",
+        bodyOfWater: "Cenote",
+      }),
+    );
+
+    const stored = await getDive(owner.id, dive.id);
+    expect(stored?.title).toBe("Night dive with the reef sharks");
+    expect(stored?.water_temp_low).toBe("21.0");
+    expect(stored?.air_temp).toBe("29.5");
+    expect(stored?.cylinder_size).toBe("12.00");
+    expect(stored?.start_pressure).toBe("200.00");
+    expect(stored?.end_pressure).toBe("50.00");
+    expect(stored?.weight_feedback).toBe("Perfect");
+    expect(stored?.hood).toBe(true);
+    expect(stored?.gloves).toBe(false);
+    expect(stored?.boots).toBe(true);
+    expect(stored?.waves).toBe("Mild");
+    expect(stored?.water_type).toBe("Salt");
+    // "Cenote" isn't one of the fixed body-of-water choices -- confirms the single-column
+    // "Other" design (no separate body_of_water_other) actually stores free text as-is.
+    expect(stored?.body_of_water).toBe("Cenote");
+
+    const [row] = await backupRows(dive.id, "create");
+    expect(row.payload.dive.title).toBe("Night dive with the reef sharks");
+    expect(row.payload.dive.hood).toBe(true);
+    expect(row.payload.dive.gloves).toBe(false);
+
+    const email = renderDiveBackupEmail(row.payload);
+    expect(email.subject).toBe("Dive logged: Night dive with the reef sharks");
+    expect(email.text).toContain("Hood: Yes");
+    expect(email.text).toContain("Gloves: No");
   });
 
   it("enqueues one distinct row per edit -- two edits never collapse into one", async () => {

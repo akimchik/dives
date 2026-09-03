@@ -92,10 +92,11 @@ export default async function DivesPage() {
 
                   <span className="min-w-0 flex-1 basis-48">
                     <span className="block truncate font-medium">
-                      {dive.site_name ?? "Unnamed site"}
+                      {dive.title ?? dive.site_name ?? "Unnamed site"}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {formatDiveDate(dive.occurred_at)} · {formatDiveTime(dive.occurred_at)}
+                      {dive.title && dive.site_name ? ` · ${dive.site_name}` : ""}
                       {dive.site_location ? ` · ${dive.site_location}` : ""}
                     </span>
                   </span>

@@ -6,6 +6,7 @@ import { ChevronLeft, Pencil, Star } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
+import { DiveSiteMap } from "@/components/dive-site-map-lazy";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isDepthProfile } from "@/lib/depth-profile";
@@ -16,6 +17,7 @@ import {
   formatMinutes,
 } from "@/lib/dive-format";
 import { getDive } from "@/lib/dives";
+import { computeGasConsumption } from "@/lib/gas-consumption";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,25 @@ function DetailGroup({
   );
 }
 
+// "Hood, gloves" reads better than three mostly-empty boolean rows in the same dl grid the rest
+// of this page uses, and disappears entirely (like every other optional field here) when none
+// were worn rather than showing three "No"s.
+function wornExtras(dive: { hood: boolean | null; gloves: boolean | null; boots: boolean | null }) {
+  const worn = [
+    dive.hood ? "Hood" : null,
+    dive.gloves ? "Gloves" : null,
+    dive.boots ? "Boots" : null,
+  ].filter((item): item is string => item !== null);
+
+  return worn.length > 0 ? worn.join(", ") : null;
+}
+
+function toNumber(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export default async function DiveDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const diveId = Number(id);
@@ -65,6 +86,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
   if (!dive) notFound();
 
   const siteName = dive.site_name ?? "Unnamed site";
+  const heading = dive.title ?? siteName;
   const label = `${siteName} on ${formatDiveDate(dive.occurred_at)}`;
   // The JSONB column is `unknown` to TypeScript and nothing stops a hand-edited row, so it is
   // narrowed with the parser's own guard rather than cast.
@@ -74,6 +96,16 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
     dive.site_lat !== null && dive.site_lng !== null
       ? `${dive.site_lat}, ${dive.site_lng}`
       : null;
+
+  // Never stored -- re-derived from the stored pressures/cylinder/depth/time every time it's
+  // shown, so it can never drift from what those fields actually say.
+  const gasConsumption = computeGasConsumption({
+    startPressure: toNumber(dive.start_pressure),
+    endPressure: toNumber(dive.end_pressure),
+    cylinderSize: toNumber(dive.cylinder_size),
+    avgDepth: toNumber(dive.avg_depth),
+    bottomTimeMinutes: dive.bottom_time_minutes,
+  });
 
   return (
     <AppShell email={user.email}>
@@ -86,9 +118,10 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
             >
               <ChevronLeft className="size-3.5" aria-hidden /> Logbook
             </Link>
-            <h1 className="text-2xl font-semibold tracking-tight">{siteName}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
             <p className="text-sm text-muted-foreground">
               {formatDiveDate(dive.occurred_at)} · {formatDiveTime(dive.occurred_at)}
+              {dive.title ? ` · ${siteName}` : ""}
               {dive.site_location ? ` · ${dive.site_location}` : ""}
             </p>
             {dive.rating !== null ? (
@@ -120,13 +153,18 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
 
+        {dive.site_lat !== null && dive.site_lng !== null ? (
+          <DiveSiteMap lat={dive.site_lat} lng={dive.site_lng} height={220} />
+        ) : null}
+
         <DetailGroup
           title="Profile"
           entries={[
             ["Max depth", formatMeasurement(dive.max_depth, " m")],
             ["Average depth", formatMeasurement(dive.avg_depth, " m")],
             ["Bottom time", formatMinutes(dive.bottom_time_minutes)],
-            ["Water temp", formatMeasurement(dive.water_temp, " °C")],
+            ["Water temp — surface", formatMeasurement(dive.water_temp, " °C")],
+            ["Water temp — lowest", formatMeasurement(dive.water_temp_low, " °C")],
             ["Visibility", formatMeasurement(dive.visibility, " m")],
             ["Entry type", dive.entry_type],
           ]}
@@ -137,8 +175,21 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           entries={[
             ["Gas mix", dive.gas_mix],
             ["Cylinder", dive.tank_info],
+            ["Cylinder size", formatMeasurement(dive.cylinder_size, " L")],
+            ["Start pressure", formatMeasurement(dive.start_pressure, " bar")],
+            ["End pressure", formatMeasurement(dive.end_pressure, " bar")],
+            [
+              "Gas used",
+              gasConsumption ? `${gasConsumption.gasUsedLiters.toFixed(0)} L` : null,
+            ],
+            [
+              "SAC rate",
+              gasConsumption ? `${gasConsumption.sacRateLitersPerMin.toFixed(1)} L/min` : null,
+            ],
             ["Weight", formatMeasurement(dive.weight, " kg")],
+            ["Weighting", dive.weight_feedback],
             ["Suit", dive.suit_type],
+            ["Also worn", wornExtras(dive)],
           ]}
         />
 
@@ -147,7 +198,11 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           entries={[
             ["Current", dive.current],
             ["Surge", dive.surge],
+            ["Waves", dive.waves],
             ["Weather", dive.weather],
+            ["Air temp", formatMeasurement(dive.air_temp, " °C")],
+            ["Water type", dive.water_type],
+            ["Body of water", dive.body_of_water],
             ["Buddy / dive guide", dive.buddy],
             ["Dive shop", dive.dive_shop],
             ["Site coordinates", coordinates],

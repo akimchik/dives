@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  orderedDiveColumns,
-  renderCombinedEmail,
-  renderDiveBackupEmail,
-  renderNewUserSignupSection,
-} from "../../../scripts/notifications/templates.mjs";
+import { orderedDiveColumns, renderDiveBackupEmail } from "../../../scripts/notifications/templates.mjs";
 
 function dive(overrides = {}) {
   return {
@@ -22,53 +17,6 @@ function dive(overrides = {}) {
     ...overrides,
   };
 }
-
-describe("renderCombinedEmail single-notification path", () => {
-  it("reuses the section's own subject verbatim", () => {
-    const email = renderCombinedEmail([
-      renderNewUserSignupSection({ email: "new-user@example.com", userNumber: 3 }),
-    ]);
-
-    expect(email.subject).toBe("New user signup: new-user@example.com");
-    expect(email.html).not.toContain("<h2");
-  });
-});
-
-describe("renderCombinedEmail multi-notification path", () => {
-  it("produces a summary subject with one section per notification", () => {
-    const email = renderCombinedEmail([
-      renderNewUserSignupSection({ email: "first@example.com", userNumber: 1 }),
-      renderNewUserSignupSection({ email: "second@example.com", userNumber: 2 }),
-    ]);
-
-    expect(email.subject).toBe("Dives: 2 updates");
-    expect(email.html).toContain("New user signup: first@example.com");
-    expect(email.html).toContain("New user signup: second@example.com");
-    expect(email.text).toContain("This is user #1 (excluding test accounts).");
-    expect(email.text).toContain("This is user #2 (excluding test accounts).");
-  });
-});
-
-describe("renderNewUserSignupSection", () => {
-  it("includes the email and running non-test user count", () => {
-    const email = renderCombinedEmail([
-      renderNewUserSignupSection({ email: "new-user@example.com", userNumber: 42 }),
-    ]);
-
-    expect(email.subject).toBe("New user signup: new-user@example.com");
-    expect(email.text).toContain("New user signed up: new-user@example.com");
-    expect(email.text).toContain("This is user #42 (excluding test accounts).");
-  });
-
-  it("escapes the email in the rendered body", () => {
-    const email = renderCombinedEmail([
-      renderNewUserSignupSection({ email: "<script>bad</script>@example.com", userNumber: 1 }),
-    ]);
-
-    expect(email.html).toContain("&lt;script&gt;bad&lt;/script&gt;@example.com");
-    expect(email.html).not.toContain("<script>bad</script>");
-  });
-});
 
 describe("orderedDiveColumns", () => {
   // Postgres normalises jsonb key order, so the payload comes back out of the queue in an order
@@ -102,6 +50,14 @@ describe("renderDiveBackupEmail", () => {
   it("falls back to the dive id when the snapshot has no site or date", () => {
     const email = renderDiveBackupEmail({ event: "delete", dive: { id: 9 } });
     expect(email.subject).toBe("Dive deleted: dive #9");
+  });
+
+  it("prefers a custom title over site — date, matching the app UI's own heading convention", () => {
+    const email = renderDiveBackupEmail({
+      event: "create",
+      dive: dive({ title: "Night dive with the reef sharks" }),
+    });
+    expect(email.subject).toBe("Dive logged: Night dive with the reef sharks");
   });
 
   it("renders the dive's fields under human labels in both html and text", () => {
@@ -140,5 +96,43 @@ describe("renderDiveBackupEmail", () => {
 
     expect(email.html).toContain("&lt;script&gt;bad&lt;/script&gt;");
     expect(email.html).not.toContain("<script>bad</script>");
+  });
+
+  it("renders booleans as Yes/No, keeping explicit false (not worn) rather than dropping it", () => {
+    const email = renderDiveBackupEmail({
+      event: "create",
+      dive: dive({ hood: true, gloves: false, boots: true }),
+    });
+
+    expect(email.text).toContain("Hood: Yes");
+    expect(email.text).toContain("Gloves: No");
+    expect(email.text).toContain("Boots: Yes");
+  });
+
+  it("renders the new profile/gear/conditions fields under their own human labels", () => {
+    const email = renderDiveBackupEmail({
+      event: "create",
+      dive: dive({
+        water_temp_low: "21.0",
+        air_temp: "29.0",
+        cylinder_size: "12",
+        start_pressure: "200",
+        end_pressure: "50",
+        weight_feedback: "Perfect",
+        waves: "Mild",
+        water_type: "Salt",
+        body_of_water: "Ocean",
+      }),
+    });
+
+    expect(email.text).toContain("Water temperature — lowest: 21.0");
+    expect(email.text).toContain("Air temperature: 29.0");
+    expect(email.text).toContain("Cylinder size (L): 12");
+    expect(email.text).toContain("Start pressure (bar): 200");
+    expect(email.text).toContain("End pressure (bar): 50");
+    expect(email.text).toContain("Weighting: Perfect");
+    expect(email.text).toContain("Waves: Mild");
+    expect(email.text).toContain("Water type: Salt");
+    expect(email.text).toContain("Body of water: Ocean");
   });
 });

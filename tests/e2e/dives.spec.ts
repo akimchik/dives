@@ -33,6 +33,11 @@ async function fillSiteAndAwaitHydration(page: Page, siteName: string) {
   const createSite = page.getByRole("button", { name: "Create dive site" });
   await expect(createSite).toBeEnabled();
 
+  // Coordinates so the detail page's map preview has something to show -- harmless for tests that
+  // don't care about the map, and real coverage for the ones that do.
+  await page.getByLabel("Latitude").fill("28.5721");
+  await page.getByLabel("Longitude").fill("34.5372");
+
   // Exercises the inline-create path (createDiveSiteAction) rather than letting the dive's own
   // transaction create the site implicitly.
   await createSite.click();
@@ -89,22 +94,40 @@ test.describe("dive logbook", () => {
     await page.goto("/dives/new");
     await fillSiteAndAwaitHydration(page, siteName);
 
+    await page.getByLabel("Title").fill("Reef sharks at dusk");
     await page.getByLabel("Date & time").fill("2026-08-14T09:15");
     await page.getByLabel("Max depth (m)").fill("27.4");
     await page.getByLabel("Average depth (m)").fill("14.8");
     await page.getByLabel("Bottom time (min)").fill("48");
-    await page.getByLabel("Water temp (°C)").fill("24.5");
+    await page.getByLabel("Water temp — surface (°C)").fill("24.5");
+    await page.getByLabel("Water temp — lowest (°C)").fill("21.3");
     await page.getByLabel("Visibility (m)").fill("18");
     await chooseOption(page, "Entry type", "Boat");
 
     await page.getByLabel("Gas mix").fill("EAN32");
-    await page.getByLabel("Cylinder").fill("12L steel, 200 bar");
+    await page.getByLabel("Cylinder", { exact: true }).fill("12L steel, 200 bar");
+    await page.getByLabel("Cylinder size (L)").fill("12");
+    await page.getByLabel("Start pressure (bar)").fill("200");
+    await page.getByLabel("End pressure (bar)").fill("50");
     await page.getByLabel("Weight (kg)").fill("6");
+    await chooseOption(page, "Weighting", "Perfect");
     await chooseOption(page, "Suit", "Wetsuit 5mm");
+    await page.getByLabel("Hood").click();
+    await page.getByLabel("Boots").click();
+
+    // Gas used/SAC rate is computed live from the pressures above -- proves the calculation is
+    // wired end to end, not just at the unit-test level (lib/gas-consumption.ts is unit-tested
+    // separately for the actual formula).
+    await expect(page.getByTestId("gas-consumption-preview")).toContainText("1800 L used");
+    await expect(page.getByTestId("gas-consumption-preview")).toContainText("15.1 L/min");
 
     await chooseOption(page, "Current", "Mild");
     await chooseOption(page, "Surge", "None");
+    await chooseOption(page, "Waves", "Mild");
     await page.getByLabel("Weather").fill("Sunny, light chop");
+    await page.getByLabel("Air temp (°C)").fill("29");
+    await chooseOption(page, "Water type", "Salt");
+    await chooseOption(page, "Body of water", "Ocean");
     await page.getByLabel("Buddy / dive guide").fill("Sam Okafor");
     await page.getByLabel("Dive shop / operator").fill("Blue Hole Divers");
     await page.getByRole("radio", { name: "4 stars" }).click();
@@ -122,8 +145,14 @@ test.describe("dive logbook", () => {
     await page.waitForURL(/\/dives\/\d+$/);
     const diveUrl = page.url();
 
-    await expect(page.getByRole("heading", { name: siteName })).toBeVisible();
-    await expect(page.getByText("14 Aug 2026")).toBeVisible();
+    // The custom title wins the heading; the site name moves to the subtitle line instead. Matched
+    // as one combined string, not a bare siteName search -- the earlier "Saved dive site" toast can
+    // still be visible/fading out at this point and also contains siteName as a substring.
+    await expect(page.getByRole("heading", { name: "Reef sharks at dusk" })).toBeVisible();
+    await expect(page.getByText(`14 Aug 2026 · 09:15 · ${siteName}`)).toBeVisible();
+
+    // A site with coordinates gets a map preview.
+    await expect(page.locator(".leaflet-container")).toBeVisible();
 
     // Every field submitted above is read back from the created row.
     const detail = page.getByRole("definition");
@@ -131,15 +160,26 @@ test.describe("dive logbook", () => {
     await expect(detail.filter({ hasText: /^14\.8 m$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^48m$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^24\.5 °C$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^21\.3 °C$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^18 m$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Boat$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^EAN32$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^12L steel, 200 bar$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^12 L$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^200 bar$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^50 bar$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^1800 L$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^15\.1 L\/min$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^6 kg$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^Perfect$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Wetsuit 5mm$/ })).toBeVisible();
-    await expect(detail.filter({ hasText: /^Mild$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^Hood, Boots$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^Mild$/ }).first()).toBeVisible();
     await expect(detail.filter({ hasText: /^None$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Sunny, light chop$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^29 °C$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^Salt$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^Ocean$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Sam Okafor$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Blue Hole Divers$/ })).toBeVisible();
     await expect(page.getByText("Thermocline at 18m")).toBeVisible();

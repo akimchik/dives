@@ -19,3 +19,5 @@ public/uploads/
 AGENTS.local.md
 dev-values.yaml
 !dev-values.example.yaml
+.claude/
+TODO.md

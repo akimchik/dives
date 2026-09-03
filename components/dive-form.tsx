@@ -6,6 +6,7 @@ import { Loader2, Save, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { createDiveAction, updateDiveAction } from "@/app/actions/dives";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DepthProfileField } from "@/components/depth-profile-field";
 import {
   DiveSiteField,
@@ -28,15 +29,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { parseDepthProfile } from "@/lib/depth-profile";
 import { toDateTimeLocalValue, trimNumeric } from "@/lib/dive-format";
 import type { DiveInput, DiveRecord } from "@/lib/dives";
+import { computeGasConsumption } from "@/lib/gas-consumption";
 import { cn } from "@/lib/utils";
 
 // Radix's Select has no concept of an empty value (an empty-string SelectItem throws), so
 // "not recorded" needs its own sentinel that is mapped back to null on submit.
 const NONE = "__none__";
+const OTHER = "__other__";
 
+// "Drift" = a drift dive: entered from a moving boat and carried by the current rather than
+// anchored/fixed to one spot, so it gets its own entry type rather than folding into "Boat".
 const ENTRY_TYPES = ["Shore", "Boat", "Liveaboard", "Pier / jetty", "Drift"];
 const SUIT_TYPES = [
   "Skin / rash guard",
+  "Shorty",
   "Wetsuit 3mm",
   "Wetsuit 5mm",
   "Wetsuit 7mm",
@@ -44,24 +50,41 @@ const SUIT_TYPES = [
   "Drysuit",
 ];
 const INTENSITIES = ["None", "Mild", "Moderate", "Strong"];
+const WEIGHT_FEEDBACK = ["Underweight", "Perfect", "Overweight"];
+const WATER_TYPES = ["Salt", "Fresh", "Brackish"];
+const BODIES_OF_WATER = ["Ocean", "Lake", "Quarry", "River"];
 
 type FormState = {
+  title: string;
   occurredAt: string;
   site: DiveSiteFieldValue;
   maxDepth: string;
   avgDepth: string;
   bottomTimeMinutes: string;
   waterTemp: string;
+  waterTempLow: string;
+  airTemp: string;
   visibility: string;
   gasMix: string;
   tankInfo: string;
+  cylinderSize: string;
+  startPressure: string;
+  endPressure: string;
   weight: string;
+  weightFeedback: string;
   suitType: string;
+  hood: boolean;
+  gloves: boolean;
+  boots: boolean;
   buddy: string;
   diveShop: string;
   current: string;
   surge: string;
+  waves: string;
   weather: string;
+  waterType: string;
+  bodyOfWater: string;
+  bodyOfWaterOther: string;
   entryType: string;
   notes: string;
   rating: number | null;
@@ -70,22 +93,36 @@ type FormState = {
 
 function blankState(): FormState {
   return {
+    title: "",
     occurredAt: toDateTimeLocalValue(new Date()),
     site: emptyDiveSite,
     maxDepth: "",
     avgDepth: "",
     bottomTimeMinutes: "",
     waterTemp: "",
+    waterTempLow: "",
+    airTemp: "",
     visibility: "",
     gasMix: "",
     tankInfo: "",
+    cylinderSize: "",
+    startPressure: "",
+    endPressure: "",
     weight: "",
+    weightFeedback: NONE,
     suitType: NONE,
+    hood: false,
+    gloves: false,
+    boots: false,
     buddy: "",
     diveShop: "",
     current: NONE,
     surge: NONE,
+    waves: NONE,
     weather: "",
+    waterType: NONE,
+    bodyOfWater: NONE,
+    bodyOfWaterOther: "",
     entryType: NONE,
     notes: "",
     rating: null,
@@ -96,8 +133,13 @@ function blankState(): FormState {
 function stateFromDive(dive: DiveRecord): FormState {
   const text = (value: string | null) => value ?? "";
   const choice = (value: string | null) => value ?? NONE;
+  // A body of water outside the fixed list (typed as free text last time) round-trips through
+  // the "Other" option with its value preserved in the text field, rather than being lost.
+  const bodyOfWaterChoice =
+    dive.body_of_water && !BODIES_OF_WATER.includes(dive.body_of_water) ? OTHER : choice(dive.body_of_water);
 
   return {
+    title: text(dive.title),
     occurredAt: toDateTimeLocalValue(dive.occurred_at),
     site: {
       siteId: dive.dive_site_id,
@@ -111,16 +153,29 @@ function stateFromDive(dive: DiveRecord): FormState {
     avgDepth: trimNumeric(dive.avg_depth) ?? "",
     bottomTimeMinutes: dive.bottom_time_minutes === null ? "" : String(dive.bottom_time_minutes),
     waterTemp: trimNumeric(dive.water_temp) ?? "",
+    waterTempLow: trimNumeric(dive.water_temp_low) ?? "",
+    airTemp: trimNumeric(dive.air_temp) ?? "",
     visibility: trimNumeric(dive.visibility) ?? "",
     gasMix: text(dive.gas_mix),
     tankInfo: text(dive.tank_info),
+    cylinderSize: trimNumeric(dive.cylinder_size) ?? "",
+    startPressure: trimNumeric(dive.start_pressure) ?? "",
+    endPressure: trimNumeric(dive.end_pressure) ?? "",
     weight: trimNumeric(dive.weight) ?? "",
+    weightFeedback: choice(dive.weight_feedback),
     suitType: choice(dive.suit_type),
+    hood: dive.hood ?? false,
+    gloves: dive.gloves ?? false,
+    boots: dive.boots ?? false,
     buddy: text(dive.buddy),
     diveShop: text(dive.dive_shop),
     current: choice(dive.current),
     surge: choice(dive.surge),
+    waves: choice(dive.waves),
     weather: text(dive.weather),
+    waterType: choice(dive.water_type),
+    bodyOfWater: bodyOfWaterChoice,
+    bodyOfWaterOther: bodyOfWaterChoice === OTHER ? (dive.body_of_water ?? "") : "",
     entryType: choice(dive.entry_type),
     notes: text(dive.notes),
     rating: dive.rating,
@@ -141,6 +196,13 @@ function optionalNumber(value: string): number | null {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+// "Other" resolves to whatever was typed in the paired free-text field -- covers any body of
+// water the fixed list doesn't name (per the TODO: "other(open text)").
+function resolveBodyOfWater(state: FormState): string | null {
+  if (state.bodyOfWater === OTHER) return optionalText(state.bodyOfWaterOther);
+  return optionalChoice(state.bodyOfWater);
 }
 
 function RatingField({
@@ -206,6 +268,8 @@ function Field({
   );
 }
 
+type ChoiceOption = string | { value: string; label: string };
+
 function ChoiceField({
   id,
   label,
@@ -217,7 +281,7 @@ function ChoiceField({
   id: string;
   label: string;
   value: string;
-  options: string[];
+  options: ChoiceOption[];
   placeholder: string;
   onChange: (next: string) => void;
 }) {
@@ -230,13 +294,39 @@ function ChoiceField({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>Not recorded</SelectItem>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
+          {options.map((option) => {
+            const { value: optionValue, label: optionLabel } =
+              typeof option === "string" ? { value: option, label: option } : option;
+
+            return (
+              <SelectItem key={optionValue} value={optionValue}>
+                {optionLabel}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
+    </div>
+  );
+}
+
+function CheckField({
+  id,
+  label,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="group/field flex items-center gap-2">
+      <Checkbox id={id} checked={checked} onCheckedChange={(next) => onChange(next === true)} />
+      <Label htmlFor={id} className="font-normal">
+        {label}
+      </Label>
     </div>
   );
 }
@@ -256,6 +346,20 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
     [state.depthProfileRaw],
   );
 
+  // Live preview only -- the rate itself is never stored, it's re-derived from the stored
+  // pressures/cylinder/depth/time every time it's shown (form and detail page alike).
+  const gasConsumption = useMemo(
+    () =>
+      computeGasConsumption({
+        startPressure: optionalNumber(state.startPressure),
+        endPressure: optionalNumber(state.endPressure),
+        cylinderSize: optionalNumber(state.cylinderSize),
+        avgDepth: optionalNumber(state.avgDepth),
+        bottomTimeMinutes: optionalNumber(state.bottomTimeMinutes),
+      }),
+    [state.startPressure, state.endPressure, state.cylinderSize, state.avgDepth, state.bottomTimeMinutes],
+  );
+
   const profileIsInvalid = profileResult !== null && !profileResult.ok;
   const canSubmit = Boolean(state.occurredAt) && !profileIsInvalid && !isPending;
 
@@ -272,21 +376,34 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
 
     const input: DiveInput = {
       site: toSiteSelection(state.site),
+      title: optionalText(state.title),
       occurredAt: new Date(state.occurredAt),
       maxDepth: optionalNumber(state.maxDepth),
       avgDepth: optionalNumber(state.avgDepth),
       bottomTimeMinutes: optionalNumber(state.bottomTimeMinutes),
       waterTemp: optionalNumber(state.waterTemp),
+      waterTempLow: optionalNumber(state.waterTempLow),
+      airTemp: optionalNumber(state.airTemp),
       visibility: optionalNumber(state.visibility),
       gasMix: optionalText(state.gasMix),
       tankInfo: optionalText(state.tankInfo),
+      cylinderSize: optionalNumber(state.cylinderSize),
+      startPressure: optionalNumber(state.startPressure),
+      endPressure: optionalNumber(state.endPressure),
       weight: optionalNumber(state.weight),
+      weightFeedback: optionalChoice(state.weightFeedback),
       suitType: optionalChoice(state.suitType),
+      hood: state.hood,
+      gloves: state.gloves,
+      boots: state.boots,
       buddy: optionalText(state.buddy),
       diveShop: optionalText(state.diveShop),
       current: optionalChoice(state.current),
       surge: optionalChoice(state.surge),
+      waves: optionalChoice(state.waves),
       weather: optionalText(state.weather),
+      waterType: optionalChoice(state.waterType),
+      bodyOfWater: resolveBodyOfWater(state),
       entryType: optionalChoice(state.entryType),
       notes: optionalText(state.notes),
       rating: state.rating,
@@ -321,6 +438,15 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
           <CardTitle>When &amp; where</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
+          <Field id="title" label="Title" hint="Optional -- defaults to the site name and date.">
+            <Input
+              id="title"
+              placeholder="Night dive with the reef sharks"
+              value={state.title}
+              onChange={(event) => set("title", event.target.value)}
+            />
+          </Field>
+
           <Field id="occurredAt" label="Date & time">
             <Input
               id="occurredAt"
@@ -367,13 +493,22 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
               onChange={(event) => set("bottomTimeMinutes", event.target.value)}
             />
           </Field>
-          <Field id="waterTemp" label="Water temp (°C)">
+          <Field id="waterTemp" label="Water temp — surface (°C)">
             <Input
               id="waterTemp"
               inputMode="decimal"
               placeholder="24.5"
               value={state.waterTemp}
               onChange={(event) => set("waterTemp", event.target.value)}
+            />
+          </Field>
+          <Field id="waterTempLow" label="Water temp — lowest (°C)">
+            <Input
+              id="waterTempLow"
+              inputMode="decimal"
+              placeholder="21.0"
+              value={state.waterTempLow}
+              onChange={(event) => set("waterTempLow", event.target.value)}
             />
           </Field>
           <Field id="visibility" label="Visibility (m)">
@@ -400,40 +535,95 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
         <CardHeader>
           <CardTitle>Gear &amp; gas</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Field id="gasMix" label="Gas mix">
-            <Input
-              id="gasMix"
-              placeholder="EAN32"
-              value={state.gasMix}
-              onChange={(event) => set("gasMix", event.target.value)}
+        <CardContent className="flex flex-col gap-5">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <Field id="gasMix" label="Gas mix">
+              <Input
+                id="gasMix"
+                placeholder="EAN32"
+                value={state.gasMix}
+                onChange={(event) => set("gasMix", event.target.value)}
+              />
+            </Field>
+            <Field id="tankInfo" label="Cylinder">
+              <Input
+                id="tankInfo"
+                placeholder="12L steel, 200 bar"
+                value={state.tankInfo}
+                onChange={(event) => set("tankInfo", event.target.value)}
+              />
+            </Field>
+            <Field id="cylinderSize" label="Cylinder size (L)">
+              <Input
+                id="cylinderSize"
+                inputMode="decimal"
+                placeholder="12"
+                value={state.cylinderSize}
+                onChange={(event) => set("cylinderSize", event.target.value)}
+              />
+            </Field>
+            <Field id="startPressure" label="Start pressure (bar)">
+              <Input
+                id="startPressure"
+                inputMode="decimal"
+                placeholder="200"
+                value={state.startPressure}
+                onChange={(event) => set("startPressure", event.target.value)}
+              />
+            </Field>
+            <Field id="endPressure" label="End pressure (bar)">
+              <Input
+                id="endPressure"
+                inputMode="decimal"
+                placeholder="50"
+                value={state.endPressure}
+                onChange={(event) => set("endPressure", event.target.value)}
+              />
+            </Field>
+            <Field id="weight" label="Weight (kg)">
+              <Input
+                id="weight"
+                inputMode="decimal"
+                placeholder="6"
+                value={state.weight}
+                onChange={(event) => set("weight", event.target.value)}
+              />
+            </Field>
+            <ChoiceField
+              id="weightFeedback"
+              label="Weighting"
+              value={state.weightFeedback}
+              options={WEIGHT_FEEDBACK}
+              placeholder="Not recorded"
+              onChange={(next) => set("weightFeedback", next)}
             />
-          </Field>
-          <Field id="tankInfo" label="Cylinder">
-            <Input
-              id="tankInfo"
-              placeholder="12L steel, 200 bar"
-              value={state.tankInfo}
-              onChange={(event) => set("tankInfo", event.target.value)}
+            <ChoiceField
+              id="suitType"
+              label="Suit"
+              value={state.suitType}
+              options={SUIT_TYPES}
+              placeholder="Not recorded"
+              onChange={(next) => set("suitType", next)}
             />
-          </Field>
-          <Field id="weight" label="Weight (kg)">
-            <Input
-              id="weight"
-              inputMode="decimal"
-              placeholder="6"
-              value={state.weight}
-              onChange={(event) => set("weight", event.target.value)}
+          </div>
+
+          {gasConsumption ? (
+            <p className="text-xs text-muted-foreground" data-testid="gas-consumption-preview">
+              {gasConsumption.gasUsedLiters.toFixed(0)} L used · SAC rate{" "}
+              {gasConsumption.sacRateLitersPerMin.toFixed(1)} L/min
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <CheckField id="hood" label="Hood" checked={state.hood} onChange={(next) => set("hood", next)} />
+            <CheckField
+              id="gloves"
+              label="Gloves"
+              checked={state.gloves}
+              onChange={(next) => set("gloves", next)}
             />
-          </Field>
-          <ChoiceField
-            id="suitType"
-            label="Suit"
-            value={state.suitType}
-            options={SUIT_TYPES}
-            placeholder="Not recorded"
-            onChange={(next) => set("suitType", next)}
-          />
+            <CheckField id="boots" label="Boots" checked={state.boots} onChange={(next) => set("boots", next)} />
+          </div>
         </CardContent>
       </Card>
 
@@ -458,6 +648,14 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
             placeholder="Not recorded"
             onChange={(next) => set("surge", next)}
           />
+          <ChoiceField
+            id="waves"
+            label="Waves"
+            value={state.waves}
+            options={INTENSITIES}
+            placeholder="Not recorded"
+            onChange={(next) => set("waves", next)}
+          />
           <Field id="weather" label="Weather">
             <Input
               id="weather"
@@ -466,6 +664,41 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
               onChange={(event) => set("weather", event.target.value)}
             />
           </Field>
+          <Field id="airTemp" label="Air temp (°C)">
+            <Input
+              id="airTemp"
+              inputMode="decimal"
+              placeholder="29"
+              value={state.airTemp}
+              onChange={(event) => set("airTemp", event.target.value)}
+            />
+          </Field>
+          <ChoiceField
+            id="waterType"
+            label="Water type"
+            value={state.waterType}
+            options={WATER_TYPES}
+            placeholder="Not recorded"
+            onChange={(next) => set("waterType", next)}
+          />
+          <ChoiceField
+            id="bodyOfWater"
+            label="Body of water"
+            value={state.bodyOfWater}
+            options={[...BODIES_OF_WATER, { value: OTHER, label: "Other" }]}
+            placeholder="Not recorded"
+            onChange={(next) => set("bodyOfWater", next)}
+          />
+          {state.bodyOfWater === OTHER ? (
+            <Field id="bodyOfWaterOther" label="Body of water — other">
+              <Input
+                id="bodyOfWaterOther"
+                placeholder="Cenote"
+                value={state.bodyOfWaterOther}
+                onChange={(event) => set("bodyOfWaterOther", event.target.value)}
+              />
+            </Field>
+          ) : null}
           <Field id="buddy" label="Buddy / dive guide">
             <Input
               id="buddy"

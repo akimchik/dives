@@ -121,7 +121,7 @@ export default async function DashboardPage() {
                     className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-lg border border-border bg-card px-4 py-3 no-underline shadow-sm transition-colors hover:bg-accent/50"
                   >
                     <span className="min-w-0 flex-1 basis-48 truncate font-medium">
-                      {dive.site_name ?? "Unnamed site"}
+                      {dive.title ?? dive.site_name ?? "Unnamed site"}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {formatDiveDate(dive.occurred_at)}

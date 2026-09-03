@@ -40,21 +40,34 @@ export type DiveSiteRow = {
 // one cell per key and JSON-stringifies any nested object into it.
 export type DiveSnapshot = {
   id: number;
+  title: string | null;
   occurred_at: Date;
   max_depth: string | null;
   avg_depth: string | null;
   bottom_time_minutes: number | null;
   water_temp: string | null;
+  water_temp_low: string | null;
+  air_temp: string | null;
   visibility: string | null;
   gas_mix: string | null;
   tank_info: string | null;
+  cylinder_size: string | null;
+  start_pressure: string | null;
+  end_pressure: string | null;
   weight: string | null;
+  weight_feedback: string | null;
   suit_type: string | null;
+  hood: boolean | null;
+  gloves: boolean | null;
+  boots: boolean | null;
   buddy: string | null;
   dive_shop: string | null;
   current: string | null;
   surge: string | null;
+  waves: string | null;
   weather: string | null;
+  water_type: string | null;
+  body_of_water: string | null;
   entry_type: string | null;
   notes: string | null;
   rating: number | null;
@@ -81,21 +94,34 @@ type DiveSiteSelection =
 
 export type DiveInput = {
   site: DiveSiteSelection | null;
+  title: string | null;
   occurredAt: Date | string;
   maxDepth: number | null;
   avgDepth: number | null;
   bottomTimeMinutes: number | null;
   waterTemp: number | null;
+  waterTempLow: number | null;
+  airTemp: number | null;
   visibility: number | null;
   gasMix: string | null;
   tankInfo: string | null;
+  cylinderSize: number | null;
+  startPressure: number | null;
+  endPressure: number | null;
   weight: number | null;
+  weightFeedback: string | null;
   suitType: string | null;
+  hood: boolean | null;
+  gloves: boolean | null;
+  boots: boolean | null;
   buddy: string | null;
   diveShop: string | null;
   current: string | null;
   surge: string | null;
+  waves: string | null;
   weather: string | null;
+  waterType: string | null;
+  bodyOfWater: string | null;
   entryType: string | null;
   notes: string | null;
   rating: number | null;
@@ -109,21 +135,34 @@ export type DiveOwner = { id: string; email: string };
 
 const snapshotColumns = `
   d.id,
+  d.title,
   d.occurred_at,
   d.max_depth,
   d.avg_depth,
   d.bottom_time_minutes,
   d.water_temp,
+  d.water_temp_low,
+  d.air_temp,
   d.visibility,
   d.gas_mix,
   d.tank_info,
+  d.cylinder_size,
+  d.start_pressure,
+  d.end_pressure,
   d.weight,
+  d.weight_feedback,
   d.suit_type,
+  d.hood,
+  d.gloves,
+  d.boots,
   d.buddy,
   d.dive_shop,
   d.current,
   d.surge,
+  d.waves,
   d.weather,
+  d.water_type,
+  d.body_of_water,
   d.entry_type,
   d.notes,
   d.rating,
@@ -147,21 +186,34 @@ const diveFrom = `
 function diveValues(diveSiteId: number | null, input: DiveInput) {
   return [
     diveSiteId,
+    input.title,
     input.occurredAt,
     input.maxDepth,
     input.avgDepth,
     input.bottomTimeMinutes,
     input.waterTemp,
+    input.waterTempLow,
+    input.airTemp,
     input.visibility,
     input.gasMix,
     input.tankInfo,
+    input.cylinderSize,
+    input.startPressure,
+    input.endPressure,
     input.weight,
+    input.weightFeedback,
     input.suitType,
+    input.hood,
+    input.gloves,
+    input.boots,
     input.buddy,
     input.diveShop,
     input.current,
     input.surge,
+    input.waves,
     input.weather,
+    input.waterType,
+    input.bodyOfWater,
     input.entryType,
     input.notes,
     input.rating,
@@ -412,13 +464,15 @@ export async function createDive(owner: DiveOwner, input: DiveInput): Promise<Di
     const inserted = await client.query<{ id: number }>(
       `
         insert into dives (
-          user_id, dive_site_id, occurred_at, max_depth, avg_depth, bottom_time_minutes,
-          water_temp, visibility, gas_mix, tank_info, weight, suit_type, buddy, dive_shop,
-          current, surge, weather, entry_type, notes, rating, depth_profile, depth_profile_raw
+          user_id, dive_site_id, title, occurred_at, max_depth, avg_depth, bottom_time_minutes,
+          water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
+          start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
+          buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
+          entry_type, notes, rating, depth_profile, depth_profile_raw
         )
         values (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35
         )
         returning id
       `,
@@ -444,26 +498,39 @@ export async function updateDive(
       `
         update dives set
           dive_site_id = $3,
-          occurred_at = $4,
-          max_depth = $5,
-          avg_depth = $6,
-          bottom_time_minutes = $7,
-          water_temp = $8,
-          visibility = $9,
-          gas_mix = $10,
-          tank_info = $11,
-          weight = $12,
-          suit_type = $13,
-          buddy = $14,
-          dive_shop = $15,
-          current = $16,
-          surge = $17,
-          weather = $18,
-          entry_type = $19,
-          notes = $20,
-          rating = $21,
-          depth_profile = $22,
-          depth_profile_raw = $23,
+          title = $4,
+          occurred_at = $5,
+          max_depth = $6,
+          avg_depth = $7,
+          bottom_time_minutes = $8,
+          water_temp = $9,
+          water_temp_low = $10,
+          air_temp = $11,
+          visibility = $12,
+          gas_mix = $13,
+          tank_info = $14,
+          cylinder_size = $15,
+          start_pressure = $16,
+          end_pressure = $17,
+          weight = $18,
+          weight_feedback = $19,
+          suit_type = $20,
+          hood = $21,
+          gloves = $22,
+          boots = $23,
+          buddy = $24,
+          dive_shop = $25,
+          current = $26,
+          surge = $27,
+          waves = $28,
+          weather = $29,
+          water_type = $30,
+          body_of_water = $31,
+          entry_type = $32,
+          notes = $33,
+          rating = $34,
+          depth_profile = $35,
+          depth_profile_raw = $36,
           updated_at = now()
         where id = $1
           and user_id = $2

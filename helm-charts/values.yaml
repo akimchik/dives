@@ -50,30 +50,22 @@ env:
   # "true" (see lib/auth-config.ts). Absent entirely = disabled, same as
   # "false".
   # PASSWORD_AUTH_ENABLED: "true"
-  # Granted ordinary CRUD on every table once per db-migrate.mjs run (see
-  # scripts/db-migrate.mjs's grantAppRoleOperationalAccess) -- must match
-  # provisioning/projects.yaml's app_role for this project exactly. This is
-  # the same role the deployed app and every CronJob (except the migration
-  # container) actually connects as, see databaseApp below.
-  APP_DB_ROLE: "dev-dives.dev-dives_app"
 
-# Schema owner -- runs DDL (migrations/*.sql) and the app-role grant
-# bookkeeping. Used ONLY by the migration initContainer (see
-# deployment.yaml); the running app and every other CronJob connect as
-# databaseApp below instead, never as this role, so a compromise of the
-# live web server (the actual attack surface) can't reach owner privileges.
+# dives was provisioned with a single full-privilege Postgres role (no
+# app_role split like idea-146's dev-idea-146.dev-idea-146_user/_app --
+# add-new-project's databases param doesn't expose app_role, and adding the
+# split was explicitly deferred, see PROMPTLOG.md). `database` and
+# `databaseApp` therefore point at the SAME secret for now: the migration
+# initContainer and the running app both connect as this one role. No
+# APP_DB_ROLE grant step is needed (there's no separate low-priv role to
+# grant to yet) -- revisit both together if the split is added later.
 database:
-  secretName: dev-dives-db-credentials
+  secretName: dives-db-credentials
   usernameKey: user
   passwordKey: password
 
-# Low-privilege runtime role -- ordinary CRUD on every table, no DDL. This
-# is what the deployed app container and every CronJob except the migration
-# initContainer actually connects as. Created by pumpking's Terraform
-# alongside `database` above (provisioning/terraform/secrets.tf's
-# db_app_credentials).
 databaseApp:
-  secretName: dev-dives-db-app-credentials
+  secretName: dives-db-credentials
   usernameKey: user
   passwordKey: password
 
@@ -117,7 +109,7 @@ ingress:
 # (kubernetes_secret.authentik_client) creates and keeps in sync --
 # AUTHENTIK_CLIENT_ID/AUTHENTIK_CLIENT_SECRET for whatever OAuth2 Provider
 # is currently live in Authentik for this project.
-authentikSecretName: "dev-dives-authentik-secret"
+authentikSecretName: "dives-authentik-secret"
 
 persistentVolume:
   # -- Set to true to provision a PVC (see templates/pvc.yaml) for this release.

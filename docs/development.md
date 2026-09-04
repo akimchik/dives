@@ -111,7 +111,7 @@ same dive produce two outbox rows instead of collapsing into one.
 
 | Route | What it renders |
 | --- | --- |
-| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + the five most recent dives |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
 | `/dives` | The whole logbook, newest first |
 | `/dives/[id]` | One dive in full, with its depth-profile chart |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |

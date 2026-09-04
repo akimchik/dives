@@ -21,3 +21,9 @@ Executed via 7 staged tasks (scaffold → auth port → migrations/notification-
 Infra: pumpking project `dev-dives` (Authentik + Postgres, `dives.aleksandr.vin`) and user access for `kilo@aleksandr.vin` are committed locally in the `pumpking` repo, not yet pushed — pending review before the reconciler provisions the live cluster resources. `mcp__pumpking__add-user` hit a schema-drift bug (expects a `groups:` list, actual `users.yaml` uses a per-user `apps:` list) and was hand-applied instead; worth fixing upstream.
 
 GitHub issue tracking (AGENTS.md's workflow) was explicitly skipped for this session — no remote is configured yet.
+
+## 2026-09-04 09:38 — Activity calendar year-range selector
+
+> Add a selector to the calendar view to choose how many years to show (All,1,2,...)
+
+Added `getEarliestDiveDate` to `lib/dives.ts` and widened `/dashboard`'s activity fetch to span from the user's first dive (instead of a fixed 53-week window). `components/dive-activity-calendar.tsx` became a client component with a shadcn `Select` (year options 1..N, N = years of history capped at 10, plus "All") that reslices the already-fetched history client-side — no extra round trip per selection. "All" computes its own week count from the true earliest dive date rather than rounding to a whole year. No GitHub issue was created for this small addition; not asked about one before starting.

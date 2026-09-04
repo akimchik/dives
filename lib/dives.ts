@@ -406,6 +406,18 @@ export async function getDiveActivityByDay(
   return result.rows.map((row) => ({ date: row.date, count: Number(row.count) }));
 }
 
+// Bounds the activity calendar's "All" range selector -- how far back it needs to fetch data
+// depends on when the user's logbook actually starts, not a fixed window.
+export async function getEarliestDiveDate(userId: string): Promise<Date | null> {
+  const result = await queryRead<{ earliest: string | null }>(
+    `select min(occurred_at) as earliest from dives where user_id = $1`,
+    [userId],
+  );
+
+  const earliest = result.rows[0]?.earliest;
+  return earliest ? new Date(earliest) : null;
+}
+
 export type DiveStats = {
   totalDives: number;
   totalBottomTimeMinutes: number;

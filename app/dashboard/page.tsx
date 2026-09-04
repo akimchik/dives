@@ -12,18 +12,29 @@ import {
   formatMinutes,
   trimNumeric,
 } from "@/lib/dive-format";
-import { getDiveActivityByDay, getDiveStats, listDives } from "@/lib/dives";
+import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } from "@/lib/dives";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-// A week of slack past the calendar's own 52-week grid, so the Sunday-aligned start (which can
-// land a few days before "52 weeks ago" depending on today's weekday) is never short a row.
-function activityRange() {
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+// How far the "All" option in the calendar's year selector can reach -- past this the dropdown
+// would grow unreasonably long for what is still a personal logbook.
+const MAX_CALENDAR_YEARS = 10;
+
+// A week of slack past the earliest dive, so the Sunday-aligned grid start (which can land a few
+// days before the exact earliest-dive date depending on today's weekday) is never short a row.
+function activityRange(earliestDive: Date | null) {
   const to = new Date();
   to.setHours(24, 0, 0, 0);
-  const from = new Date(to);
-  from.setDate(from.getDate() - 53 * 7);
+  const from = new Date(earliestDive ?? to);
+  from.setDate(from.getDate() - 7);
   return { from, to };
+}
+
+function maxCalendarYears(earliestDive: Date | null, to: Date): number {
+  if (!earliestDive) return 1;
+  const years = Math.ceil((to.getTime() - earliestDive.getTime()) / MS_PER_YEAR);
+  return Math.min(MAX_CALENDAR_YEARS, Math.max(1, years));
 }
 
 export const metadata: Metadata = {
@@ -63,12 +74,14 @@ function Stat({
 
 export default async function DashboardPage() {
   const user = await requireUser("/dashboard");
+  const earliestDive = await getEarliestDiveDate(user.id);
   const [stats, dives, activity] = await Promise.all([
     getDiveStats(user.id),
     listDives(user.id),
-    getDiveActivityByDay(user.id, activityRange()),
+    getDiveActivityByDay(user.id, activityRange(earliestDive)),
   ]);
   const recent = dives.slice(0, 5);
+  const maxYears = maxCalendarYears(earliestDive, new Date());
 
   return (
     <AppShell email={user.email}>
@@ -114,7 +127,7 @@ export default async function DashboardPage() {
         <Card>
           <CardContent className="flex flex-col gap-3 px-4">
             <h2 className="text-sm font-medium">Activity</h2>
-            <DiveActivityCalendar activity={activity} />
+            <DiveActivityCalendar activity={activity} maxYears={maxYears} />
           </CardContent>
         </Card>
 

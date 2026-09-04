@@ -110,6 +110,18 @@ function diveTitle(dive) {
   return site ?? when ?? `dive #${dive?.id ?? "?"}`;
 }
 
+// A deleted dive has nothing left to link to (the route 404s) -- only create/edit get a live link.
+// Absent NEXT_PUBLIC_BASE_URL degrades gracefully to no link at all, same as HEALTHCHECK_PING_URL
+// elsewhere in this codebase, rather than emailing a broken/relative URL.
+function diveUrl(dive, event) {
+  if (event === "delete") return null;
+
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim().replace(/\/$/, "");
+  if (!baseUrl || !dive?.id) return null;
+
+  return `${baseUrl}/dives/${dive.id}`;
+}
+
 // dive_backup is the only notification type left -- each row renders its own complete email
 // rather than a combinable section. The payload is `{ event: "create" | "edit" | "delete",
 // dive: { ...flat column snapshot } }` — written by the dive server actions and serialised
@@ -117,6 +129,7 @@ function diveTitle(dive) {
 export function renderDiveBackupEmail({ event, dive }) {
   const label = DIVE_EVENT_LABELS[event] ?? "changed";
   const title = diveTitle(dive);
+  const url = diveUrl(dive, event);
 
   const fields = orderedDiveEntries(dive)
     .filter(([key]) => !DIVE_BODY_SKIPPED_FIELDS.has(key))
@@ -126,6 +139,7 @@ export function renderDiveBackupEmail({ event, dive }) {
   const bodyHtml =
     `<p>Your dive log entry was <strong>${escapeHtml(label)}</strong>. This email is your backup ` +
     `copy — the full record is attached as JSON and CSV.</p>` +
+    (url ? `<p><a href="${escapeHtml(url)}">View this dive</a></p>` : "") +
     `<ul style="list-style:none;padding:0;margin:0 0 12px;">` +
     fields
       .map(
@@ -137,6 +151,7 @@ export function renderDiveBackupEmail({ event, dive }) {
 
   const bodyText = [
     `Your dive log entry was ${label}. This email is your backup copy — the full record is attached as JSON and CSV.`,
+    ...(url ? [``, `View this dive: ${url}`] : []),
     ``,
     ...fields.map(([field, value]) => `${field}: ${value}`),
   ].join("\n");

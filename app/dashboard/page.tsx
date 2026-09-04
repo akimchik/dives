@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Gauge, MapPin, Plus, Timer, Waves } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
+import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -11,9 +12,19 @@ import {
   formatMinutes,
   trimNumeric,
 } from "@/lib/dive-format";
-import { getDiveStats, listDives } from "@/lib/dives";
+import { getDiveActivityByDay, getDiveStats, listDives } from "@/lib/dives";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
+
+// A week of slack past the calendar's own 52-week grid, so the Sunday-aligned start (which can
+// land a few days before "52 weeks ago" depending on today's weekday) is never short a row.
+function activityRange() {
+  const to = new Date();
+  to.setHours(24, 0, 0, 0);
+  const from = new Date(to);
+  from.setDate(from.getDate() - 53 * 7);
+  return { from, to };
+}
 
 export const metadata: Metadata = {
   title: "Dashboard · Dives",
@@ -52,7 +63,11 @@ function Stat({
 
 export default async function DashboardPage() {
   const user = await requireUser("/dashboard");
-  const [stats, dives] = await Promise.all([getDiveStats(user.id), listDives(user.id)]);
+  const [stats, dives, activity] = await Promise.all([
+    getDiveStats(user.id),
+    listDives(user.id),
+    getDiveActivityByDay(user.id, activityRange()),
+  ]);
   const recent = dives.slice(0, 5);
 
   return (
@@ -95,6 +110,13 @@ export default async function DashboardPage() {
             testId="stat-distinct-sites"
           />
         </div>
+
+        <Card>
+          <CardContent className="flex flex-col gap-3 px-4">
+            <h2 className="text-sm font-medium">Activity</h2>
+            <DiveActivityCalendar activity={activity} />
+          </CardContent>
+        </Card>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-4">

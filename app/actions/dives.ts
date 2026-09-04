@@ -7,11 +7,13 @@ import {
   deleteDive,
   findOrCreateDiveSite,
   listDiveSites,
+  listRecentCylinders,
   updateDive,
   DiveNotFoundError,
   DiveSiteNotFoundError,
   type DiveInput,
   type DiveSiteRow,
+  type RecentCylinder,
 } from "@/lib/dives";
 import { requireUser } from "@/lib/session";
 
@@ -59,6 +61,13 @@ export async function createDiveSiteAction(input: {
   } catch (error) {
     return toActionError(error);
   }
+}
+
+// Populates the dive form's optional "recent cylinder" picker -- the session user's own last 5
+// distinct cylinders only.
+export async function recentCylindersAction(): Promise<RecentCylinder[]> {
+  const user = await requireUser();
+  return listRecentCylinders(user.id);
 }
 
 export async function createDiveAction(input: DiveInput): Promise<DiveActionResult> {

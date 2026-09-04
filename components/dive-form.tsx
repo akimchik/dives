@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Save, Star } from "lucide-react";
 import { toast } from "sonner";
 
-import { createDiveAction, updateDiveAction } from "@/app/actions/dives";
+import { createDiveAction, recentCylindersAction, updateDiveAction } from "@/app/actions/dives";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DepthProfileField } from "@/components/depth-profile-field";
 import {
@@ -28,7 +28,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { parseDepthProfile } from "@/lib/depth-profile";
 import { toDateTimeLocalValue, trimNumeric } from "@/lib/dive-format";
-import type { DiveInput, DiveRecord } from "@/lib/dives";
+import type { DiveInput, DiveRecord, RecentCylinder } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
 import { cn } from "@/lib/utils";
 
@@ -310,6 +310,61 @@ function ChoiceField({
   );
 }
 
+function formatCylinderOption(option: RecentCylinder): string {
+  const size = option.cylinderSize ? `${trimNumeric(option.cylinderSize)} L` : null;
+  return [option.tankInfo, size].filter(Boolean).join(" · ") || "—";
+}
+
+// Optional convenience, not a bound form field -- deliberately uncontrolled, so after a pick the
+// trigger just shows that option's own label rather than needing to reset back to a placeholder.
+function RecentCylinderPicker({
+  onPick,
+}: {
+  onPick: (option: RecentCylinder) => void;
+}) {
+  const [options, setOptions] = useState<RecentCylinder[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    recentCylindersAction()
+      .then((result) => {
+        if (!cancelled) setOptions(result);
+      })
+      .catch(() => {
+        if (!cancelled) setOptions([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!options || options.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <Select
+        onValueChange={(index) => {
+          const option = options[Number(index)];
+          if (option) onPick(option);
+        }}
+      >
+        <SelectTrigger aria-label="Use a recent cylinder" className="h-8 w-auto text-xs">
+          <SelectValue placeholder="Use a recent cylinder" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option, index) => (
+            <SelectItem key={index} value={String(index)}>
+              {formatCylinderOption(option)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function CheckField({
   id,
   label,
@@ -562,6 +617,17 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
                 onChange={(event) => set("cylinderSize", event.target.value)}
               />
             </Field>
+            <div className="flex flex-col justify-end gap-1.5 sm:col-span-2 lg:col-span-1">
+              <RecentCylinderPicker
+                onPick={(option) => {
+                  setState((previous) => ({
+                    ...previous,
+                    tankInfo: option.tankInfo ?? previous.tankInfo,
+                    cylinderSize: trimNumeric(option.cylinderSize) ?? previous.cylinderSize,
+                  }));
+                }}
+              />
+            </div>
             <Field id="startPressure" label="Start pressure (bar)">
               <Input
                 id="startPressure"

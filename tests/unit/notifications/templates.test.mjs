@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { orderedDiveColumns, renderDiveBackupEmail } from "../../../scripts/notifications/templates.mjs";
+
+const BASE_URL_ENV = "NEXT_PUBLIC_BASE_URL";
+const ORIGINAL_BASE_URL = process.env[BASE_URL_ENV];
+
+afterEach(() => {
+  if (ORIGINAL_BASE_URL === undefined) {
+    delete process.env[BASE_URL_ENV];
+  } else {
+    process.env[BASE_URL_ENV] = ORIGINAL_BASE_URL;
+  }
+});
 
 function dive(overrides = {}) {
   return {
@@ -134,5 +145,32 @@ describe("renderDiveBackupEmail", () => {
     expect(email.text).toContain("Waves: Mild");
     expect(email.text).toContain("Water type: Salt");
     expect(email.text).toContain("Body of water: Ocean");
+  });
+
+  it("links to the dive on create/edit, trimming a trailing slash off the base URL", () => {
+    process.env[BASE_URL_ENV] = "https://dives.aleksandr.vin/";
+
+    const created = renderDiveBackupEmail({ event: "create", dive: dive({ id: 42 }) });
+    expect(created.text).toContain("View this dive: https://dives.aleksandr.vin/dives/42");
+    expect(created.html).toContain('<a href="https://dives.aleksandr.vin/dives/42">View this dive</a>');
+
+    const edited = renderDiveBackupEmail({ event: "edit", dive: dive({ id: 42 }) });
+    expect(edited.text).toContain("View this dive: https://dives.aleksandr.vin/dives/42");
+  });
+
+  it("omits the link entirely on delete -- the route 404s, nothing to link to", () => {
+    process.env[BASE_URL_ENV] = "https://dives.aleksandr.vin";
+
+    const email = renderDiveBackupEmail({ event: "delete", dive: dive({ id: 42 }) });
+    expect(email.text).not.toContain("View this dive");
+    expect(email.html).not.toContain("<a href");
+  });
+
+  it("omits the link when NEXT_PUBLIC_BASE_URL is unset rather than emailing a broken URL", () => {
+    delete process.env[BASE_URL_ENV];
+
+    const email = renderDiveBackupEmail({ event: "create", dive: dive({ id: 42 }) });
+    expect(email.text).not.toContain("View this dive");
+    expect(email.html).not.toContain("<a href");
   });
 });

@@ -264,4 +264,52 @@ test.describe("dive logbook", () => {
     await expect(page.getByText("Parsed 5 points.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Log dive" })).toBeEnabled();
   });
+
+  test("recent-cylinder picker fills both Cylinder and Cylinder size from a past dive", async ({
+    page,
+  }) => {
+    await registerViaMagicLink(page, uniqueTestEmail("recent-cylinder"), PASSWORD);
+
+    // No prior dives yet -- the picker has nothing to offer, so it must not render at all rather
+    // than showing an empty/broken dropdown.
+    await page.goto("/dives/new");
+    await fillSiteAndAwaitHydration(page, `Cylinder History ${Date.now()}`);
+    await expect(page.getByLabel("Use a recent cylinder")).not.toBeAttached();
+
+    await page.getByLabel("Date & time").fill("2026-08-14T09:15");
+    await page.getByLabel("Cylinder", { exact: true }).fill("15L steel, 232 bar");
+    await page.getByLabel("Cylinder size (L)").fill("15");
+    await page.getByRole("button", { name: "Log dive" }).click();
+    await page.waitForURL(/\/dives\/\d+$/);
+
+    // A second dive: the picker now has the first dive's cylinder to offer.
+    await page.goto("/dives/new");
+    await fillSiteAndAwaitHydration(page, `Cylinder History 2 ${Date.now()}`);
+    await page.getByLabel("Date & time").fill("2026-08-15T09:15");
+
+    // Leave Cylinder/Cylinder size blank here on purpose -- picking the option must fill them,
+    // not just be decorative.
+    const picker = page.getByLabel("Use a recent cylinder");
+    await expect(picker).toBeVisible();
+    await picker.click();
+    await page.getByRole("option", { name: "15L steel, 232 bar · 15 L" }).click();
+
+    await expect(page.getByLabel("Cylinder", { exact: true })).toHaveValue("15L steel, 232 bar");
+    await expect(page.getByLabel("Cylinder size (L)")).toHaveValue("15");
+  });
+
+  test("dashboard shows a dive activity calendar", async ({ page }) => {
+    await registerViaMagicLink(page, uniqueTestEmail("activity-calendar"), PASSWORD);
+
+    await page.goto("/dives/new");
+    await fillSiteAndAwaitHydration(page, `Calendar Check ${Date.now()}`);
+    await page.getByLabel("Date & time").fill("2026-08-14T09:15");
+    await page.getByRole("button", { name: "Log dive" }).click();
+    await page.waitForURL(/\/dives\/\d+$/);
+
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+    // The accessible name itself carries the dive count -- getByRole matching it is the assertion.
+    await expect(page.getByRole("img", { name: /dive activity over the last year: 1 dive logged/i })).toBeVisible();
+  });
 });

@@ -21,9 +21,11 @@ const {
   deleteDive,
   findOrCreateDiveSite,
   getDive,
+  getDiveActivityByDay,
   getDiveStats,
   listDiveSites,
   listDives,
+  listRecentCylinders,
   updateDive,
   DiveNotFoundError,
   DiveSiteNotFoundError,
@@ -348,5 +350,91 @@ describe("dashboard stats", () => {
       deepestDepth: "41.20",
       distinctSites: 1,
     });
+  });
+});
+
+describe("listRecentCylinders", () => {
+  it("orders by the dive's own occurred_at, not creation order, and de-duplicates", async () => {
+    const owner = await createOwner();
+
+    // Created in this order: 12L (old dive) -> 15L (newer dive) -> 12L again, but dated NEWER
+    // than the 15L dive -- proves ordering follows occurred_at, not insertion order.
+    await createDive(
+      owner,
+      diveInput({ occurredAt: "2026-01-01T09:00:00.000Z", tankInfo: "12L steel", cylinderSize: 12 }),
+    );
+    await createDive(
+      owner,
+      diveInput({ occurredAt: "2026-02-01T09:00:00.000Z", tankInfo: "15L steel", cylinderSize: 15 }),
+    );
+    await createDive(
+      owner,
+      diveInput({ occurredAt: "2026-03-01T09:00:00.000Z", tankInfo: "12L steel", cylinderSize: 12 }),
+    );
+
+    expect(await listRecentCylinders(owner.id)).toEqual([
+      { tankInfo: "12L steel", cylinderSize: "12.00" },
+      { tankInfo: "15L steel", cylinderSize: "15.00" },
+    ]);
+  });
+
+  it("returns only the 5 most recent distinct cylinders, oldest excluded", async () => {
+    const owner = await createOwner();
+
+    for (let i = 0; i < 6; i += 1) {
+      await createDive(
+        owner,
+        diveInput({
+          occurredAt: `2026-0${i + 1}-01T09:00:00.000Z`,
+          tankInfo: `Cylinder ${i}`,
+          cylinderSize: 10 + i,
+        }),
+      );
+    }
+
+    const result = await listRecentCylinders(owner.id);
+    expect(result).toHaveLength(5);
+    expect(result.map((c) => c.tankInfo)).toEqual([
+      "Cylinder 5",
+      "Cylinder 4",
+      "Cylinder 3",
+      "Cylinder 2",
+      "Cylinder 1",
+    ]);
+    expect(result.map((c) => c.tankInfo)).not.toContain("Cylinder 0");
+  });
+
+  it("skips dives with neither field recorded and never returns another user's cylinders", async () => {
+    const alice = await createOwner();
+    const bob = await createOwner();
+
+    await createDive(alice, diveInput({ tankInfo: null, cylinderSize: null }));
+    await createDive(bob, diveInput({ tankInfo: "Bob's 12L", cylinderSize: 12 }));
+
+    expect(await listRecentCylinders(alice.id)).toEqual([]);
+  });
+});
+
+describe("getDiveActivityByDay", () => {
+  it("groups dive counts by day within the range, scoped to the session user", async () => {
+    const owner = await createOwner();
+    const other = await createOwner();
+
+    await createDive(owner, diveInput({ occurredAt: "2026-06-01T08:00:00.000Z" }));
+    await createDive(owner, diveInput({ occurredAt: "2026-06-01T15:00:00.000Z" }));
+    await createDive(owner, diveInput({ occurredAt: "2026-06-03T08:00:00.000Z" }));
+    // Outside the queried range and belonging to another user -- neither should appear.
+    await createDive(owner, diveInput({ occurredAt: "2026-07-15T08:00:00.000Z" }));
+    await createDive(other, diveInput({ occurredAt: "2026-06-01T08:00:00.000Z" }));
+
+    const result = await getDiveActivityByDay(owner.id, {
+      from: new Date("2026-06-01T00:00:00.000Z"),
+      to: new Date("2026-07-01T00:00:00.000Z"),
+    });
+
+    expect(result).toEqual([
+      { date: "2026-06-01", count: 2 },
+      { date: "2026-06-03", count: 1 },
+    ]);
   });
 });

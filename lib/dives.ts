@@ -350,6 +350,62 @@ export async function getDive(userId: string, diveId: number): Promise<DiveRecor
   return result.rows[0] ?? null;
 }
 
+export type RecentCylinder = {
+  tankInfo: string | null;
+  cylinderSize: string | null;
+};
+
+// The form's optional "recent cylinder" picker: the user's last 5 distinct (tank_info,
+// cylinder_size) combinations, ordered by the most recent dive that used each one -- not by
+// creation order, so editing an old dive's gear doesn't reorder the list. Rows where the user
+// recorded neither field are excluded; there's nothing to offer for those.
+export async function listRecentCylinders(userId: string): Promise<RecentCylinder[]> {
+  const result = await queryRead<{ tank_info: string | null; cylinder_size: string | null }>(
+    `
+      select tank_info, cylinder_size
+      from (
+        select
+          tank_info,
+          cylinder_size,
+          max(occurred_at) as last_used_at
+        from dives
+        where user_id = $1
+          and (tank_info is not null or cylinder_size is not null)
+        group by tank_info, cylinder_size
+      ) recent
+      order by last_used_at desc
+      limit 5
+    `,
+    [userId],
+  );
+
+  return result.rows.map((row) => ({ tankInfo: row.tank_info, cylinderSize: row.cylinder_size }));
+}
+
+// GitHub-style activity calendar (dashboard): dive counts per day, grouped in SQL rather than
+// aggregated client-side over the full dive list, since only the count and date leave the query.
+export type DailyDiveCount = { date: string; count: number };
+
+export async function getDiveActivityByDay(
+  userId: string,
+  range: { from: Date; to: Date },
+): Promise<DailyDiveCount[]> {
+  const result = await queryRead<{ date: string; count: string }>(
+    `
+      select to_char(occurred_at, 'YYYY-MM-DD') as date, count(*) as count
+      from dives
+      where user_id = $1
+        and occurred_at >= $2
+        and occurred_at < $3
+      group by 1
+      order by 1 asc
+    `,
+    [userId, range.from, range.to],
+  );
+
+  return result.rows.map((row) => ({ date: row.date, count: Number(row.count) }));
+}
+
 export type DiveStats = {
   totalDives: number;
   totalBottomTimeMinutes: number;

@@ -24,7 +24,7 @@ export function CausticOverlay() {
   return (
     <div
       className="pointer-events-none fixed inset-0 overflow-hidden"
-      style={{ zIndex: 6 }}
+      style={{ zIndex: 25 }}
     >
       <style>{keyframes}</style>
 

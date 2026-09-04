@@ -24,8 +24,8 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <TooltipProvider>
             {/* Mounted once, app-wide: the only underwater motif in the UI (plan Step 6). It is
-                pointer-events-none and fixed, so it tints every screen without intercepting a
-                single click. */}
+                pointer-events-none and fixed at z-25, rendering above page content (edit boxes,
+                buttons, etc.) so it tints every screen without intercepting a single click. */}
             <CausticOverlay />
             {children}
             <Toaster richColors />

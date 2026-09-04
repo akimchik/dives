@@ -151,9 +151,12 @@ trace reads like a dive computer's.
 `2prutsers.com` and is mounted once in `app/layout.tsx`. It is the only
 underwater motif in the app — deliberately. Nothing else changes Tailwind theme
 colours or fonts, and no other component adds wave/bubble decoration. It is
-`fixed`, `pointer-events-none` and sits at `z-index: 6`; `AppShell` puts page
-content at `z-10` so the light rays wash over the background rather than the
-text.
+`fixed`, `pointer-events-none` and sits at `z-index: 25`, above `AppShell`'s
+`z-10` page content, so the light rays wash visibly over edit boxes, buttons
+and cards instead of being hidden behind them. Being `pointer-events-none`
+means this never intercepts a click. It stays below Radix portal content
+(dialogs/dropdowns/selects/tooltips, all `z-50`), so popovers and menus still
+render above the rays.
 
 ## Run the app
 

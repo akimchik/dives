@@ -9,8 +9,11 @@ import { NavLink } from "@/components/nav-link";
  * Chrome shared by every authenticated logbook screen: a compact header (brand, primary nav,
  * theme toggle, sign-out) over a centred content column.
  *
- * `relative z-10` on the wrapper keeps the page above CausticOverlay's fixed z-6 layer, so the
- * light rays wash over the background rather than over the text.
+ * `relative z-10` on the wrapper is just a stacking context anchor: CausticOverlay renders at a
+ * higher fixed z-25 so the light rays wash over page content (edit boxes, buttons, etc.) instead
+ * of being hidden behind it. The overlay stays `pointer-events-none`, so it never blocks clicks;
+ * it also sits below Radix portal content (dialogs/dropdowns/selects/tooltips, all z-50), so
+ * popovers and menus still render above the rays.
  */
 export function AppShell({
   email,

@@ -27,3 +27,9 @@ GitHub issue tracking (AGENTS.md's workflow) was explicitly skipped for this ses
 > Add a selector to the calendar view to choose how many years to show (All,1,2,...)
 
 Added `getEarliestDiveDate` to `lib/dives.ts` and widened `/dashboard`'s activity fetch to span from the user's first dive (instead of a fixed 53-week window). `components/dive-activity-calendar.tsx` became a client component with a shadcn `Select` (year options 1..N, N = years of history capped at 10, plus "All") that reslices the already-fetched history client-side — no extra round trip per selection. "All" computes its own week count from the true earliest dive date rather than rounding to a whole year. No GitHub issue was created for this small addition; not asked about one before starting.
+
+## 2026-09-04 10:15 — Calendar rows: one year per row
+
+> Make it one year per row
+
+Follow-up on the range selector above. First pass stacked rows as rolling 52-week blocks ending on today minus N×364 days; changed to true calendar years (Jan 1 – Dec 31, current year on top, clipped at today) per a second follow-up ("Show whole year 1 jan - 31 dec for the passed years"). Manual verification with a Playwright script (multi-year dives, screenshotted, then deleted) caught two real bugs before landing: (1) boundary weeks that dip into the adjacent year were mislabeled with that neighbor's month, fixed by only sourcing a week's month label from days that belong to the row's own year; (2) `toDateKey` used `date.toISOString().slice(0,10)`, which converts to UTC first and silently shifts every cell back a day in any timezone ahead of UTC (this machine is UTC+2) -- a Dec 28 dive was rendering in both the Dec-28 row and, one day early, at the start of the following year's row. Fixed by formatting the key from local date components instead. Worth checking whether the same UTC-shift pattern exists anywhere else dates are serialized to strings in this codebase.

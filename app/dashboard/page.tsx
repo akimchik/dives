@@ -16,7 +16,6 @@ import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } fr
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 // How far the "All" option in the calendar's year selector can reach -- past this the dropdown
 // would grow unreasonably long for what is still a personal logbook.
 const MAX_CALENDAR_YEARS = 10;
@@ -31,9 +30,11 @@ function activityRange(earliestDive: Date | null) {
   return { from, to };
 }
 
-function maxCalendarYears(earliestDive: Date | null, to: Date): number {
+// Matches DiveActivityCalendar's own per-calendar-year row count: current year plus each full
+// prior year back through the year of the earliest dive.
+function maxCalendarYears(earliestDive: Date | null, today: Date): number {
   if (!earliestDive) return 1;
-  const years = Math.ceil((to.getTime() - earliestDive.getTime()) / MS_PER_YEAR);
+  const years = today.getFullYear() - earliestDive.getFullYear() + 1;
   return Math.min(MAX_CALENDAR_YEARS, Math.max(1, years));
 }
 

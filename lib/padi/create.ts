@@ -27,7 +27,7 @@ type PadiIntegrationTokenRow = {
 
 const VISIBILITY_BY_DISTANCE = [
   { max: 5, value: "Low" },
-  { max: 15, value: "Medium" },
+  { max: 15, value: "Average" },
   { max: Infinity, value: "High" },
 ] as const;
 

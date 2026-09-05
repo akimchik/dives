@@ -87,6 +87,7 @@ Key enum translations are intentionally conservative and visible in tests:
 | `weight_feedback = Perfect` | `weight_type = Good` |
 | `waves/current/surge = None/Mild/Moderate/Strong` | PADI `No*`/`Some*`/`Medium*`/`Strong*` (waves use `SmallWaves` for Mild and `LargeWaves` for Strong) |
 | `rating = 1/2-3/4/5` | `feeling = Poor/Average/Good/Amazing` |
+| Visibility distance `<=5m` / `<=15m` / `>15m` | `visibility = Low` / `Average` / `High` (PADI rejects `Medium`) |
 | `gas_mix = Air` | `gas_mixture = Air`, `oxygen = 21`, `nitrogen = 79`, `helium = 0` |
 | `gas_mix = EAN32` | `gas_mixture = Nitrox`, `oxygen = 32`, `nitrogen = 68`, `helium = 0` |
 | Free-form `tank_info` like `2x7L, Steel 232bar` | `cylinder_type = Steel`, `cylinder_size = 14`; PADI gets only its material enum plus numeric size, never the raw custom text |

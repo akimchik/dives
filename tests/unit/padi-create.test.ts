@@ -107,6 +107,32 @@ describe("mapDiveToPadiCreateInput", () => {
     });
   });
 
+  it("maps visibility distance into PADI's observed Low/Average/High visibility enum", () => {
+    expect(
+      mapDiveToPadiCreateInput(
+        { ...baseDive, visibility: "5" },
+        "29837190",
+        new Date("2026-09-05T13:17:42.000Z"),
+      ),
+    ).toMatchObject({ conditions: { data: { visibility: "Low", visibility_distance: "5.000" } } });
+
+    expect(
+      mapDiveToPadiCreateInput(
+        { ...baseDive, visibility: "8" },
+        "29837190",
+        new Date("2026-09-05T13:17:42.000Z"),
+      ),
+    ).toMatchObject({ conditions: { data: { visibility: "Average", visibility_distance: "8.000" } } });
+
+    expect(
+      mapDiveToPadiCreateInput(
+        { ...baseDive, visibility: "20" },
+        "29837190",
+        new Date("2026-09-05T13:17:42.000Z"),
+      ),
+    ).toMatchObject({ conditions: { data: { visibility: "High", visibility_distance: "20.000" } } });
+  });
+
   it("maps nitrox gas and blank optional strings without guessing missing numeric values", () => {
     const result = mapDiveToPadiCreateInput(
       {

@@ -114,3 +114,7 @@ User started an earlier prompt, “Custom cylinder does not fit PADI:”, then i
 ## 2026-09-05 16:55 Commit and push PADI cylinder fix
 
 User requested committing and pushing the PADI custom-cylinder mapping and UI error propagation fix.
+
+## 2026-09-05 17:14 PADI visibility enum error
+
+User reported PADI API create failing with `invalid input value for enum visibility: "Medium"`, noted there are Low/Average/High values, and pointed to `padi-log-backup-pretty.json`.

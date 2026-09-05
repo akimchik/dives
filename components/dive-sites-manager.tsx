@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { Edit, GitMerge, Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,6 +45,11 @@ type SiteFormState = {
 };
 
 type MergeField = keyof SiteFormState;
+
+const DiveSiteMap = dynamic(
+  () => import("@/components/dive-site-map").then((mod) => mod.DiveSiteMap),
+  { ssr: false, loading: () => <div className="h-[220px] animate-pulse rounded-md border border-border bg-muted" /> },
+);
 
 const mergeFields: Array<{ key: MergeField; label: string }> = [
   { key: "name", label: "Name" },
@@ -408,6 +414,15 @@ function SiteFields({
           disabled={disabled}
           onChange={(event) => onChange({ ...value, lng: event.target.value })}
         />
+      </div>
+      <div className="flex flex-col gap-1.5 sm:col-span-2">
+        <Label>Location on map</Label>
+        <DiveSiteMap
+          lat={optionalNumber(value.lat)}
+          lng={optionalNumber(value.lng)}
+          onPick={(lat, lng) => onChange({ ...value, lat: lat.toFixed(6), lng: lng.toFixed(6) })}
+        />
+        <p className="text-xs text-muted-foreground">Click the map to set this site&apos;s coordinates.</p>
       </div>
     </div>
   );

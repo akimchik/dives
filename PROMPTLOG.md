@@ -82,3 +82,11 @@ User answered that existing Gitea issue #1 should be used for the dive-sites edi
 ## 2026-09-05 14:32 Commit dive-sites feature
 
 User requested committing the implemented dive-sites editing and merge feature.
+
+## 2026-09-05 14:34 Map control for dive-site edit dialog
+
+User requested adding the same map control used during dive-site creation to the dive-site edit dialog, because editing latitude/longitude manually is hard.
+
+## 2026-09-05 14:46 Commit dive-site edit map picker
+
+User requested committing the map-control follow-up for the dive-site edit dialog.

@@ -120,7 +120,7 @@ same dive produce two outbox rows instead of collapsing into one.
 | `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
 | `/dives` | The whole logbook, newest first |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
-| `/dives/[id]` | One dive in full, with its depth-profile chart |
+| `/dives/[id]` | One dive in full, with its depth-profile chart and a create-only PADI action when the user is connected and the dive is not already linked |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
 
 All authenticated logbook screens call `requireUser("<their own path>")` before any query, so a logged-out
@@ -133,9 +133,9 @@ Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
 every authenticated screen), `manage-menu.tsx` (the header menu linking to Dive
 Sites and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
 over the user's own sites, with inline create), `dive-sites-manager.tsx`,
-`depth-profile-field.tsx`, `depth-profile-chart.tsx` and `delete-dive-button.tsx`. Every button that makes a
-server call follows `AGENTS.md`'s convention: disabled with a spinner for the
-duration, then a sonner toast on the result.
+`depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx` and
+`delete-dive-button.tsx`. Every button that makes a server call follows `AGENTS.md`'s convention:
+disabled with a spinner for the duration, then a sonner toast on the result.
 
 ### Depth profile
 

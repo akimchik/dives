@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PADI_CLIENT_ID,
   PadiApiError,
+  createLogbookDive,
   decodeIdTokenClaims,
   fetchLogbookDetail,
   fetchLogbookPage,
@@ -127,6 +128,34 @@ describe("fetchLogbookPage", () => {
     const body = JSON.parse(options.body);
     expect(body.variables).toEqual({ affiliate_id: "29837190", limit: 15, offset: 15 });
     expect(body.query).toContain("logbook_logs");
+  });
+});
+
+describe("createLogbookDive", () => {
+  it("sends the captured create mutation with the affiliate header and one general object", async () => {
+    const response = { data: { insert_logbook_logs: { affected_rows: 5, returning: [{ id: 22316606 }] } } };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const general = {
+      affiliate_id: "29837190",
+      log_type: "Recreational",
+      dive_title: "First time at TODI",
+    };
+
+    const result = await createLogbookDive("id-token-value", "29837190", general);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://logbook.global-prod.padi.com/api/Logbook");
+    expect(options.headers["affiliate-id"]).toBe("29837190");
+    expect(options.headers["x-platform"]).toBe("web");
+    expect(options.headers.Authorization).toBe("Bearer id-token-value");
+
+    const body = JSON.parse(options.body);
+    expect(body.query).toContain("mutation insert_logbook_logs");
+    expect(body.variables).toEqual({ general });
+    expect(result).toEqual(response);
   });
 });
 

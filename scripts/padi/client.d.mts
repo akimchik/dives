@@ -25,6 +25,15 @@ export interface PadiLogbookLogsPage {
   };
 }
 
+export interface PadiCreateLogbookDiveResponse {
+  data: {
+    insert_logbook_logs: {
+      affected_rows: number;
+      returning: Array<Record<string, unknown> & { id: number }>;
+    };
+  };
+}
+
 export function login(username: string, password: string): Promise<PadiLoginResponse>;
 
 export function refresh(refreshToken: string, idToken: string): Promise<PadiLoginResponse>;
@@ -40,5 +49,11 @@ export function fetchLogbookDetail(
   affiliateId: string | number,
   id: string | number,
 ): Promise<PadiLogbookLogsPage>;
+
+export function createLogbookDive(
+  bearerToken: string,
+  affiliateId: string | number,
+  general: Record<string, unknown>,
+): Promise<PadiCreateLogbookDiveResponse>;
 
 export function decodeIdTokenClaims(idToken: string): { affiliateId: string | undefined };

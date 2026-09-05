@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/lib/session";
+import { getDive } from "@/lib/dives";
 import { assertKeyConfigured } from "@/lib/padi/crypto";
 import { login, PadiApiError } from "@/lib/padi/client";
 import { deletePadiIntegration, savePadiIntegration } from "@/lib/padi/integrations";
 import { checkRateLimit, hashUsername, isRateLimited, recordFailedAttempt } from "@/lib/padi/rate-limit";
+import { createDiveInPadi, type CreatePadiDiveResult } from "@/lib/padi/create";
 import { syncPadiLogbook, type SyncPadiResult } from "@/lib/padi/sync";
 
 const UNAVAILABLE_ERROR = "PADI sync is temporarily unavailable. Please try again later.";
@@ -15,6 +17,12 @@ const UNAVAILABLE_ERROR = "PADI sync is temporarily unavailable. Please try agai
 // back as a result rather than a thrown error -- same discriminated-union convention as
 // app/actions/dives.ts's DiveActionResult.
 export type PadiActionResult = { ok: true } | { ok: false; error: string };
+
+type CreatePadiDiveFailureReason = Extract<CreatePadiDiveResult, { ok: false }>["reason"];
+
+export type CreatePadiDiveActionResult =
+  | { ok: true; padiDiveId: number }
+  | { ok: false; error: string; reason: CreatePadiDiveFailureReason | "not_found" };
 
 function revalidatePadiPaths() {
   revalidatePath("/dashboard");
@@ -92,6 +100,22 @@ export async function syncPadiAction(): Promise<SyncPadiResult> {
     revalidatePath("/dashboard");
     revalidatePath("/dives");
   }
+
+  return result;
+}
+
+export async function createPadiDiveAction(diveId: number): Promise<CreatePadiDiveActionResult> {
+  const user = await requireUser();
+  const dive = await getDive(user.id, diveId);
+
+  if (!dive) return { ok: false, error: "Dive not found", reason: "not_found" };
+
+  const result = await createDiveInPadi(user, dive);
+  if (!result.ok) return result;
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dives");
+  revalidatePath(`/dives/${diveId}`);
 
   return result;
 }

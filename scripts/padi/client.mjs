@@ -22,6 +22,25 @@ export const LOGBOOK_PAGE_QUERY = `query logbook_logs($affiliate_id: Int!, $limi
   }
 }`;
 
+const CREATE_LOGBOOK_DIVE_MUTATION = `mutation insert_logbook_logs($general: [logbook_logs_insert_input!]!) {
+  insert_logbook_logs(objects: $general) {
+    affected_rows
+    returning {
+      id
+      affiliate_id
+      dive_title
+      dive_type
+      dive_location
+      log_type
+      log_course
+      dive_date
+      created_date
+      status
+      adventure_dive
+    }
+  }
+}`;
+
 const LOGBOOK_DETAIL_QUERY = `query logbook_logs($affiliate_id: Int!, $id: Int!) {
   logbook_logs(
     where: {affiliate_id: {_eq: $affiliate_id}, _and: {id: {_eq: $id}}}
@@ -186,6 +205,27 @@ export async function fetchLogbookDetail(bearerToken, affiliateId, id) {
     body: {
       query: LOGBOOK_DETAIL_QUERY,
       variables: { affiliate_id: String(affiliateId), id: String(id) },
+    },
+  });
+}
+
+
+/**
+ * Creates a new PADI logbook dive from this app's local dive fields. `bearerToken` must be the
+ * idToken, matching the read-side logbook calls above. PADI's browser request sends the insert
+ * object as `variables.general` even though the mutation type is a one-item array; keep that shape
+ * for compatibility with the captured request.
+ */
+export async function createLogbookDive(bearerToken, affiliateId, general) {
+  return padiRequest(`${PADI_LOGBOOK_BASE_URL}/api/Logbook`, {
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      "x-platform": "web",
+      "affiliate-id": String(affiliateId),
+    },
+    body: {
+      query: CREATE_LOGBOOK_DIVE_MUTATION,
+      variables: { general },
     },
   });
 }

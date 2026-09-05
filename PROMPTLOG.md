@@ -90,3 +90,15 @@ User requested adding the same map control used during dive-site creation to the
 ## 2026-09-05 14:46 Commit dive-site edit map picker
 
 User requested committing the map-control follow-up for the dive-site edit dialog.
+
+## 2026-09-05 14:48 Create dives in PADI feature
+
+User requested a new feature for creating dives in PADI, using the updated local scratch file for the new example, explicitly leaving PADI dive updates out of scope for now.
+
+## 2026-09-05 14:49 Create new Gitea issue for PADI create
+
+User said to create a new Gitea issue for the new feature: creating dives in PADI, with PADI updates out of scope.
+
+## 2026-09-05 16:19 Commit PADI create feature
+
+User requested committing the implemented create-only PADI dive feature.

@@ -1,12 +1,14 @@
 # PADI logbook sync
 
-Read-only v1: a user connects their PADI dive-certification account, and a "Sync PADI" button on
-the Dashboard imports their PADI logbook into this app's own `dives` table. No data is ever written
-back to PADI.
+A user connects their PADI dive-certification account, and a "Sync PADI" button on the Dashboard
+imports their PADI logbook into this app's own `dives` table. The only write-back supported today
+is **creating** a local dive in PADI from the dive detail page; updating an already-linked PADI dive
+remains out of scope.
 
-Tracked as Gitea issue [#1](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/1),
+Initial sync was tracked as Gitea issue [#1](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/1),
 scoped via `.omc/specs/deep-interview-padi-logbook-sync.md` and `.omc/plans/padi-logbook-sync.md`
-(workspace-local, not committed).
+(workspace-local, not committed). The create-only PADI write-back is tracked as Gitea issue
+[#2](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/2).
 
 ## Auth flow
 
@@ -42,9 +44,18 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
    `needs_reconnect_at`, not `connected_at`), so a user who disconnects, reconnects, and disconnects
    again is notified every time, not just the first.
 5. **Sync** (`app/actions/padi.ts`'s `syncPadiAction` → `lib/padi/sync.ts`'s `syncPadiLogbook`,
-   triggered by the Dashboard's "Sync PADI" button): decrypts the stored `accessToken`, decodes the
-   PADI affiliate id from the stored `idToken`'s `custom:affiliate_id` claim, and walks PADI's
-   paginated logbook GraphQL endpoint end to end, importing every not-yet-seen dive.
+   triggered by the Dashboard's "Sync PADI" button): decrypts the stored `idToken`, decodes the
+   PADI affiliate id from that same token's `custom:affiliate_id` claim, and walks PADI's paginated
+   logbook GraphQL endpoint end to end, importing every not-yet-seen dive. The logbook API bearer
+   token is intentionally the idToken, not the accessToken, because PADI validates the bearer token's
+   own affiliate claim against the `affiliate-id` header.
+6. **Create in PADI** (`app/actions/padi.ts`'s `createPadiDiveAction` →
+   `lib/padi/create.ts`'s `createDiveInPadi`, triggered by the dive detail page's "Create in PADI"
+   button): available only for connected users and local dives with no `padi_dive_id`. It decrypts
+   the stored `idToken`, builds the captured `insert_logbook_logs` GraphQL payload, POSTs it to
+   `https://logbook.global-prod.padi.com/api/Logbook`, and stores the returned PADI id plus raw
+   PADI provenance fields on the local dive. The local row is still filtered by `user_id` when it is
+   marked, so another user's dive id can never be linked.
 
 **Rate limiting**: a failed connect attempt is rate-limited on two dimensions
 (`lib/padi/rate-limit.ts`): the calling app user (5 failed attempts / rolling hour — the user-facing
@@ -58,7 +69,31 @@ connect/sync/refresh — an unconfigured checkout still boots and serves every n
 normally. `PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS` is only ever set during an active key rotation
 (decrypt falls back to it if the current key fails), and is not a normal deployment secret.
 
-## Field map
+## Create-in-PADI field map
+
+`lib/padi/create.ts` maps the app's existing `dives` columns into PADI's create mutation shape.
+Dates are sent as `MM/DD/YYYY`, timestamps are ISO seconds with no milliseconds, and the local site
+name becomes PADI's free-text `dive_location`. The create payload mirrors the observed browser
+request in the gitignored `scratch` file: one `general` insert object with nested `depth_times`,
+`conditions`, `equipment`, and `experiences` `data` objects.
+
+Key enum translations are intentionally conservative and visible in tests:
+
+| App value | PADI create value |
+|---|---|
+| `entry_type = Shore` / `Pier / jetty` | `dive_type = BeachShore` |
+| `entry_type = Boat` / `Liveaboard` / `Drift` | `dive_type = Boat` |
+| `suit_type = Wetsuit 7mm` | `suit_type = FullSuit_7mm` (same pattern for 3mm/5mm) |
+| `weight_feedback = Perfect` | `weight_type = Good` |
+| `waves/current/surge = None/Mild/Moderate/Strong` | PADI `No*`/`Some*`/`Medium*`/`Strong*` (waves use `SmallWaves` for Mild and `LargeWaves` for Strong) |
+| `rating = 1/2-3/4/5` | `feeling = Poor/Average/Good/Amazing` |
+| `gas_mix = Air` | `gas_mixture = Air`, `oxygen = 21`, `nitrogen = 79`, `helium = 0` |
+| `gas_mix = EAN32` | `gas_mixture = Nitrox`, `oxygen = 32`, `nitrogen = 68`, `helium = 0` |
+
+Updating an existing PADI dive is intentionally not implemented. Once `padi_dive_id` is present the
+detail page hides the create button rather than offering an update path.
+
+## Import field map
 
 PADI's `logbook_logs` GraphQL detail query (see the repo's local, gitignored `scratch` file for the
 captured request/response shapes) returns nested `depth_times`/`conditions`/`equipment`/
@@ -151,7 +186,7 @@ fails that test instead of silently importing as `null`.
 
 ## Non-goals (v1)
 
-- No write-back to PADI.
+- No updating existing PADI dives.
 - No automatic/scheduled sync — only user-triggered, via the Dashboard button.
 - No incremental/date-filtered sync — each sync walks the full logbook; the insert-only dedup
   (`on conflict (user_id, padi_dive_id) do nothing`) makes repeat full syncs cheap and safely

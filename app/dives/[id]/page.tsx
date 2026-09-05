@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Pencil, Star } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
+import { CreatePadiDiveButton } from "@/components/create-padi-dive-button";
 import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
 import { DiveSiteMap } from "@/components/dive-site-map-lazy";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/dive-format";
 import { getDive } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
+import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -81,7 +83,10 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
 
   if (!Number.isInteger(diveId)) notFound();
 
-  const dive = await getDive(user.id, diveId);
+  const [dive, padiIntegration] = await Promise.all([
+    getDive(user.id, diveId),
+    getPadiIntegrationStatus(user.id),
+  ]);
 
   if (!dive) notFound();
 
@@ -143,6 +148,9 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           </div>
 
           <div className="flex items-center gap-2">
+            {dive.padi_dive_id === null && padiIntegration?.status === "connected" ? (
+              <CreatePadiDiveButton diveId={dive.id} />
+            ) : null}
             <Link
               href={`/dives/${dive.id}/edit`}
               className={cn(buttonVariants({ variant: "outline" }), "no-underline")}

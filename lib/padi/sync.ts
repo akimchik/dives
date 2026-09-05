@@ -130,10 +130,11 @@ export async function syncPadiLogbook(
     const claims = decodeIdTokenClaims(idToken);
     if (!claims.affiliateId) throw new Error("PADI idToken is missing custom:affiliate_id");
     affiliateId = String(claims.affiliateId);
-  } catch {
+  } catch (error) {
     // A misconfigured/rotated-out encryption key is an infrastructure problem, never a PADI-side
     // rejection -- must never be conflated with "needs_reconnect" (see the cronjob's identical
     // classification rule in scripts/padi/token-refresh.mjs).
+    console.error("PADI sync failed to decrypt stored tokens", error);
     return { ok: false, error: "Sync temporarily unavailable", reason: "infrastructure" };
   }
 
@@ -202,6 +203,7 @@ async function runSync({
       if (isReconnectRequired(error)) {
         return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
       }
+      console.error("PADI sync failed while listing the logbook", error);
       return { ok: false, error: "Sync failed while listing your PADI logbook", reason: "infrastructure" };
     }
 
@@ -222,6 +224,8 @@ async function runSync({
       } catch (error) {
         if (isReconnectRequired(error)) {
           reconnectRequired = true;
+        } else {
+          console.error(`PADI sync failed to fetch logbook detail ${id}`, error);
         }
         return { ok: false as const };
       }
@@ -239,7 +243,8 @@ async function runSync({
         continue;
       }
 
-      const mapped = mapPadiLogToDive(detail.record as PadiLogbookDetail);
+      const record = detail.record as PadiLogbookDetail;
+      const mapped = mapPadiLogToDive(record);
       if (!mapped.ok) {
         skipped += 1;
         continue;
@@ -252,7 +257,8 @@ async function runSync({
         } else {
           skipped += 1;
         }
-      } catch {
+      } catch (error) {
+        console.error(`PADI sync failed to insert dive from logbook detail ${record.id}`, error);
         skipped += 1;
       }
 

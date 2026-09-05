@@ -108,6 +108,8 @@ export type DiveSnapshot = {
   log_type: string | null;
   log_course: string | null;
   padi_status: string | null;
+  padi_needs_update: boolean;
+  padi_last_compared_at: Date | null;
   site_name: string | null;
   site_location: string | null;
   site_lat: number | null;
@@ -211,6 +213,8 @@ const snapshotColumns = `
   d.log_type,
   d.log_course,
   d.padi_status,
+  d.padi_needs_update,
+  d.padi_last_compared_at,
   s.name as site_name,
   s.location as site_location,
   s.lat as site_lat,
@@ -887,6 +891,10 @@ export async function updateDive(
           rating = $34,
           depth_profile = $35,
           depth_profile_raw = $36,
+          padi_needs_update = case
+            when padi_dive_id is not null and log_type = 'Recreational' and log_course is null then true
+            else padi_needs_update
+          end,
           updated_at = now()
         where id = $1
           and user_id = $2
@@ -905,6 +913,38 @@ export async function updateDive(
 
     return snapshot;
   });
+}
+
+export async function findDiveByPadiId(userId: string, padiDiveId: number): Promise<DiveRecord | null> {
+  const result = await queryRead<DiveRecord>(
+    `
+      select ${snapshotColumns}, d.dive_site_id
+      ${diveFrom}
+      where d.user_id = $1
+        and d.padi_dive_id = $2
+      limit 1
+    `,
+    [userId, padiDiveId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function markPadiComparison(
+  userId: string,
+  padiDiveId: number,
+  needsUpdate: boolean,
+): Promise<void> {
+  await getPool().query(
+    `
+      update dives
+      set padi_needs_update = $3,
+          padi_last_compared_at = now()
+      where user_id = $1
+        and padi_dive_id = $2
+    `,
+    [userId, padiDiveId, needsUpdate],
+  );
 }
 
 export async function deleteDive(owner: DiveOwner, diveId: number): Promise<DiveSnapshot> {

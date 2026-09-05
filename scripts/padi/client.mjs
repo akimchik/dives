@@ -41,6 +41,24 @@ const CREATE_LOGBOOK_DIVE_MUTATION = `mutation insert_logbook_logs($general: [lo
   }
 }`;
 
+const UPDATE_RECREATIONAL_DIVE_LOG_MUTATION = `mutation UpdateRecreationalDiveLog($id: Int!, $general: logbook_logs_set_input!, $depthTime: logbook_depth_time_set_input!, $conditions: logbook_conditions_set_input!, $equipment: logbook_equipment_set_input!, $experience: logbook_experience_set_input!) {
+  update_logbook_logs(where: {id: {_eq: $id}}, _set: $general) {
+    affected_rows
+  }
+  update_logbook_depth_time(where: {logs_id: {_eq: $id}}, _set: $depthTime) {
+    affected_rows
+  }
+  update_logbook_conditions(where: {logs_id: {_eq: $id}}, _set: $conditions) {
+    affected_rows
+  }
+  update_logbook_equipment(where: {logs_id: {_eq: $id}}, _set: $equipment) {
+    affected_rows
+  }
+  update_logbook_experience(where: {logs_id: {_eq: $id}}, _set: $experience) {
+    affected_rows
+  }
+}`;
+
 const LOGBOOK_DETAIL_QUERY = `query logbook_logs($affiliate_id: Int!, $id: Int!) {
   logbook_logs(
     where: {affiliate_id: {_eq: $affiliate_id}, _and: {id: {_eq: $id}}}
@@ -226,6 +244,24 @@ export async function createLogbookDive(bearerToken, affiliateId, general) {
     body: {
       query: CREATE_LOGBOOK_DIVE_MUTATION,
       variables: { general },
+    },
+  });
+}
+
+/**
+ * Updates an existing recreational PADI logbook dive. Course/training dives use a different PADI
+ * workflow and are intentionally not supported by this app's write-back path.
+ */
+export async function updateRecreationalLogbookDive(bearerToken, affiliateId, payload) {
+  return padiRequest(`${PADI_LOGBOOK_BASE_URL}/api/Logbook`, {
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      "x-platform": "web",
+      "affiliate-id": String(affiliateId),
+    },
+    body: {
+      query: UPDATE_RECREATIONAL_DIVE_LOG_MUTATION,
+      variables: payload,
     },
   });
 }

@@ -120,7 +120,7 @@ same dive produce two outbox rows instead of collapsing into one.
 | `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
 | `/dives` | The whole logbook, newest first |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
-| `/dives/[id]` | One dive in full, with its depth-profile chart and a create-only PADI action when the user is connected and the dive is not already linked |
+| `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, and an update-to-PADI action for linked recreational dives marked out-of-sync |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
 
 All authenticated logbook screens call `requireUser("<their own path>")` before any query, so a logged-out
@@ -268,10 +268,13 @@ stored), encrypts the returned tokens (`scripts/padi/crypto.mjs`,
 fresh via `scripts/padi/token-refresh.mjs`; malformed 2xx refresh bodies are
 classified instead of being allowed to crash the CronJob. A "Sync PADI" button
 (`syncPadiAction` → `lib/padi/sync.ts`) imports the user's full logbook into
-`dives`, insert-only and deduped by `padi_dive_id`. Requires
-`PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see
-`.env.example`); both are read lazily, so an unconfigured checkout still
-boots and serves every non-PADI page/test normally.
+`dives`, deduped by `padi_dive_id`, and compares already-linked details so
+linked recreational dives whose local fields differ are flagged with
+`padi_needs_update`. The detail page's "Update to PADI" action uses the captured
+recreational update mutation and never updates PADI course/training dives.
+Requires `PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see
+`.env.example`); both are read lazily, so an unconfigured checkout still boots
+and serves every non-PADI page/test normally.
 
 ## Tests
 

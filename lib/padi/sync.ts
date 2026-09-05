@@ -2,7 +2,7 @@ import "server-only";
 
 import pg from "pg";
 
-import { createDiveFromPadi, type DiveOwner } from "@/lib/dives";
+import { createDiveFromPadi, findDiveByPadiId, markPadiComparison, type DiveOwner } from "@/lib/dives";
 import { getPool, queryRead } from "@/lib/db";
 import { getDatabaseUrl } from "@/lib/database-url";
 import { assertKeyConfigured, decryptSecret, keyFromEnvValue } from "./crypto";
@@ -13,6 +13,7 @@ import {
   fetchLogbookPage as defaultFetchLogbookPage,
 } from "./client";
 import { mapPadiLogToDive, type PadiLogbookDetail } from "./field-map";
+import { isPadiRecreationalRecord, padiDiffersFromLocal } from "./diff";
 
 // Non-blocking advisory lock (pg_try_advisory_lock's two-arg form) keyed by a fixed classid so this
 // feature's locks never collide with any other advisory lock this app might use in the future.
@@ -32,7 +33,7 @@ const DETAIL_FETCH_CONCURRENCY = 5;
 const WALL_TIME_BUDGET_MS = 45_000;
 
 export type SyncPadiResult =
-  | { ok: true; imported: number; skipped: number; remaining: boolean }
+  | { ok: true; imported: number; skipped: number; needsUpdate: number; remaining: boolean }
   | { ok: false; error: string; reason: "not_connected" | "reconnect_required" | "in_progress" | "infrastructure" };
 
 interface PadiIntegrationRow {
@@ -95,7 +96,8 @@ function isReconnectRequired(error: unknown): boolean {
 }
 
 /**
- * Imports the user's entire PADI logbook, insert-only, deduped by `padi_dive_id`. Never refreshes
+ * Walks the user's entire PADI logbook, importing new dives and comparing already-linked dives
+ * for local-to-PADI update availability. Never refreshes
  * PADI tokens itself -- that's the token-refresh CronJob's exclusive responsibility (see
  * scripts/padi-token-refresh.mjs); a 401 here means the caller needs to wait for the next refresh
  * cycle or reconnect, not that this function should retry with a refresh of its own.
@@ -197,6 +199,7 @@ async function runSync({
   const deadline = Date.now() + WALL_TIME_BUDGET_MS;
   let imported = 0;
   let skipped = 0;
+  let needsUpdate = 0;
   let offset = 0;
 
   while (Date.now() < deadline) {
@@ -216,22 +219,20 @@ async function runSync({
 
     const candidateIds: number[] = (summaries as Array<{ id: number }>).map((summary) => summary.id);
     const alreadyImported = await alreadyImportedIds(owner.id, candidateIds);
-    const toFetch = candidateIds.filter((id) => !alreadyImported.has(id));
-    skipped += candidateIds.length - toFetch.length;
 
     let reconnectRequired = false;
 
-    const details = await mapWithConcurrency(toFetch, DETAIL_FETCH_CONCURRENCY, async (id) => {
+    const details = await mapWithConcurrency(candidateIds, DETAIL_FETCH_CONCURRENCY, async (id) => {
       try {
         const detail = await padiClient.fetchLogbookDetail(bearerToken, affiliateId, id);
-        return { ok: true as const, record: detail?.data?.logbook_logs?.[0] };
+        return { ok: true as const, id, alreadyImported: alreadyImported.has(id), record: detail?.data?.logbook_logs?.[0] };
       } catch (error) {
         if (isReconnectRequired(error)) {
           reconnectRequired = true;
         } else {
           console.error(`PADI sync failed to fetch logbook detail ${id}`, error);
         }
-        return { ok: false as const };
+        return { ok: false as const, id, alreadyImported: alreadyImported.has(id) };
       }
     });
 
@@ -248,6 +249,21 @@ async function runSync({
       }
 
       const record = detail.record as PadiLogbookDetail;
+
+      if (detail.alreadyImported) {
+        const localDive = await findDiveByPadiId(owner.id, record.id);
+        if (!localDive) {
+          skipped += 1;
+          continue;
+        }
+
+        const shouldOfferUpdate = isPadiRecreationalRecord(record) && padiDiffersFromLocal(localDive, record, affiliateId);
+        await markPadiComparison(owner.id, record.id, shouldOfferUpdate);
+        if (shouldOfferUpdate) needsUpdate += 1;
+        skipped += 1;
+        continue;
+      }
+
       const mapped = mapPadiLogToDive(record);
       if (!mapped.ok) {
         skipped += 1;
@@ -267,7 +283,7 @@ async function runSync({
       }
 
       if (Date.now() >= deadline) {
-        return { ok: true, imported, skipped, remaining: true };
+        return { ok: true, imported, skipped, needsUpdate, remaining: true };
       }
     }
 
@@ -275,9 +291,9 @@ async function runSync({
     offset += PAGE_SIZE;
 
     if (Date.now() >= deadline) {
-      return { ok: true, imported, skipped, remaining: true };
+      return { ok: true, imported, skipped, needsUpdate, remaining: true };
     }
   }
 
-  return { ok: true, imported, skipped, remaining: false };
+  return { ok: true, imported, skipped, needsUpdate, remaining: false };
 }

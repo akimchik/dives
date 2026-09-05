@@ -31,6 +31,17 @@ const VISIBILITY_BY_DISTANCE = [
   { max: Infinity, value: "High" },
 ] as const;
 
+type PadiUpdateSection = Record<string, string | number | boolean | null>;
+
+export type PadiUpdatePayload = {
+  id: number;
+  general: PadiUpdateSection;
+  depthTime: PadiUpdateSection;
+  conditions: PadiUpdateSection;
+  equipment: PadiUpdateSection;
+  experience: PadiUpdateSection;
+};
+
 const PADI_DIVE_TYPE_BY_ENTRY_TYPE: Record<string, string> = {
   Shore: "BeachShore",
   "Pier / jetty": "BeachShore",
@@ -99,6 +110,10 @@ function toPadiNumberString(value: string | number | null, fractionDigits?: numb
   const parsed = toNumber(value);
   if (parsed === null) return null;
   return fractionDigits === undefined ? String(parsed) : parsed.toFixed(fractionDigits);
+}
+
+function toPadiNumber(value: string | number | null): number | null {
+  return toNumber(value);
 }
 
 function parseCylinderLiters(tankInfo: string | null): number | null {
@@ -240,6 +255,71 @@ export function mapDiveToPadiCreateInput(dive: DiveRecord, affiliateId: string |
         buddies: trimString(dive.buddy),
         dive_center: trimString(dive.dive_shop),
       },
+    },
+  };
+}
+
+export function mapDiveToPadiUpdatePayload(
+  dive: DiveRecord,
+  affiliateId: string | number,
+  now = new Date(),
+): PadiUpdatePayload | null {
+  if (dive.padi_dive_id === null) return null;
+
+  const gas = parseGas(dive.gas_mix);
+
+  return {
+    id: dive.padi_dive_id,
+    general: {
+      affiliate_id: String(affiliateId),
+      log_type: "Recreational",
+      log_course: null,
+      log_number: dive.dive_number,
+      update_date: formatPadiTimestamp(now),
+      dive_type: dive.entry_type ? (PADI_DIVE_TYPE_BY_ENTRY_TYPE[dive.entry_type] ?? dive.entry_type) : null,
+      dive_title: trimString(dive.title),
+      dive_location: trimString(dive.site_name),
+      dive_date: formatPadiDate(dive.occurred_at),
+      status: dive.padi_status ?? "Publish",
+      memsys_member_number: dive.padi_member_number,
+      adventure_dive: dive.adventure_dive ? true : null,
+    },
+    depthTime: {
+      bottom_time: dive.bottom_time_minutes,
+      max_depth: toPadiNumber(dive.max_depth),
+    },
+    conditions: {
+      water_type: trimString(dive.water_type),
+      body_of_water: trimString(dive.body_of_water) ?? "Other",
+      weather: trimString(dive.weather),
+      air_temp: toPadiNumber(dive.air_temp),
+      surface_water_temp: toPadiNumber(dive.water_temp),
+      bottom_water_temp: toPadiNumber(dive.water_temp_low),
+      visibility: mapVisibility(dive.visibility),
+      visibility_distance: toPadiNumber(dive.visibility),
+      wave_condition: dive.waves ? (PADI_WAVES_BY_APP_INTENSITY[dive.waves] ?? dive.waves) : null,
+      current: dive.current ? (PADI_CURRENT_BY_APP_INTENSITY[dive.current] ?? dive.current) : null,
+      surge: dive.surge ? (PADI_SURGE_BY_APP_INTENSITY[dive.surge] ?? dive.surge) : null,
+    },
+    equipment: {
+      starting_pressure: toPadiNumber(dive.start_pressure),
+      ending_pressure: toPadiNumber(dive.end_pressure),
+      suit_type: dive.suit_type ? (PADI_SUIT_BY_APP_SUIT[dive.suit_type] ?? dive.suit_type) : null,
+      weight: toPadiNumber(dive.weight),
+      weight_type: dive.weight_feedback ? (PADI_WEIGHT_BY_APP_WEIGHT[dive.weight_feedback] ?? dive.weight_feedback) : null,
+      additional_equipment: mapAdditionalEquipment(dive),
+      cylinder_type: mapCylinderType(dive),
+      cylinder_size: toPadiNumber(mapCylinderSize(dive)),
+      gas_mixture: gas.mixture,
+      oxygen: toPadiNumber(gas.oxygen),
+      nitrogen: toPadiNumber(gas.nitrogen),
+      helium: toPadiNumber(gas.helium),
+    },
+    experience: {
+      feeling: dive.rating === null ? null : (PADI_FEELING_BY_RATING[dive.rating] ?? null),
+      notes: trimString(dive.notes),
+      buddies: trimString(dive.buddy),
+      dive_center: trimString(dive.dive_shop),
     },
   };
 }

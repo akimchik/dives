@@ -38,6 +38,11 @@ export default async function IntegrationsPage() {
                 status ? { status: status.status, connectedAt: status.connectedAt.toISOString() } : null
               }
             />
+            <p className="text-xs text-muted-foreground">
+              PADI sync imports new remote dives and flags linked recreational dives whose local
+              copy differs from PADI. To replace a local linked dive with PADI’s version, delete the
+              local dive and run Sync PADI again.
+            </p>
           </CardContent>
         </Card>
       </div>

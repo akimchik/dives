@@ -8,6 +8,7 @@ import { CreatePadiDiveButton } from "@/components/create-padi-dive-button";
 import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
 import { DiveSiteMap } from "@/components/dive-site-map-lazy";
+import { UpdatePadiDiveButton } from "@/components/update-padi-dive-button";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isDepthProfile } from "@/lib/depth-profile";
@@ -96,6 +97,12 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
   // The JSONB column is `unknown` to TypeScript and nothing stops a hand-edited row, so it is
   // narrowed with the parser's own guard rather than cast.
   const profile = isDepthProfile(dive.depth_profile) ? dive.depth_profile : null;
+  const canUpdatePadi =
+    dive.padi_needs_update &&
+    dive.padi_dive_id !== null &&
+    dive.log_type === "Recreational" &&
+    dive.log_course === null &&
+    padiIntegration?.status === "connected";
 
   const coordinates =
     dive.site_lat !== null && dive.site_lng !== null
@@ -151,6 +158,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
             {dive.padi_dive_id === null && padiIntegration?.status === "connected" ? (
               <CreatePadiDiveButton diveId={dive.id} />
             ) : null}
+            {canUpdatePadi ? <UpdatePadiDiveButton diveId={dive.id} /> : null}
             <Link
               href={`/dives/${dive.id}/edit`}
               className={cn(buttonVariants({ variant: "outline" }), "no-underline")}
@@ -163,6 +171,15 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
 
         {dive.site_lat !== null && dive.site_lng !== null ? (
           <DiveSiteMap lat={dive.site_lat} lng={dive.site_lng} height={220} />
+        ) : null}
+
+        {canUpdatePadi ? (
+          <Card className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+            <CardContent className="px-4 text-sm">
+              This linked recreational dive differs from the latest PADI sync. Use “Update to PADI”
+              to push this local version to PADI.
+            </CardContent>
+          </Card>
         ) : null}
 
         <DetailGroup

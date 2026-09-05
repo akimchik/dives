@@ -106,6 +106,7 @@ describe("createDiveFromPadi", () => {
     expect(stored?.log_type).toBe("Recreational");
     expect(stored?.log_course).toBeNull();
     expect(stored?.padi_status).toBe("Publish");
+    expect(stored?.padi_needs_update).toBe(false);
   });
 
   it("is idempotent: a second insert with the same (user_id, padi_dive_id) does not duplicate", async () => {
@@ -251,6 +252,7 @@ describe("createDiveFromPadi", () => {
     expect(stored?.log_type).toBe("Recreational");
     expect(stored?.log_course).toBeNull();
     expect(stored?.padi_status).toBe("Publish");
+    expect(stored?.padi_needs_update).toBe(true);
 
     // And that ordinary edit DID flow through the normal, untouched backup path (confirms the
     // "first manual edit gets a normal backup email" behavior still works).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DiveRecord } from "@/lib/dives";
-import { mapDiveToPadiCreateInput, padiCreateValidationError } from "@/lib/padi/create";
+import { mapDiveToPadiCreateInput, mapDiveToPadiUpdatePayload, padiCreateValidationError } from "@/lib/padi/create";
 
 const baseDive: DiveRecord = {
   id: 42,
@@ -48,6 +48,8 @@ const baseDive: DiveRecord = {
   log_type: null,
   log_course: null,
   padi_status: null,
+  padi_needs_update: false,
+  padi_last_compared_at: null,
   site_name: "TODI",
   site_location: "Beringen, Belgium",
   site_lat: 51.047,
@@ -131,6 +133,51 @@ describe("mapDiveToPadiCreateInput", () => {
         new Date("2026-09-05T13:17:42.000Z"),
       ),
     ).toMatchObject({ conditions: { data: { visibility: "High", visibility_distance: "20.000" } } });
+  });
+
+  it("builds the captured PADI recreational update payload using numbers for set inputs", () => {
+    const result = mapDiveToPadiUpdatePayload(
+      {
+        ...baseDive,
+        padi_dive_id: 22238544,
+        padi_member_number: 0,
+        log_type: "Recreational",
+        padi_status: "Publish",
+        visibility: "8",
+      },
+      "29837190",
+      new Date("2026-09-05T13:24:20.123Z"),
+    );
+
+    expect(result).toMatchObject({
+      id: 22238544,
+      general: {
+        affiliate_id: "29837190",
+        log_type: "Recreational",
+        log_course: null,
+        update_date: "2026-09-05T13:24:20",
+        dive_type: "BeachShore",
+        dive_title: "First time at TODI",
+        dive_location: "TODI",
+        dive_date: "03/03/2026",
+        status: "Publish",
+        memsys_member_number: 0,
+        adventure_dive: null,
+      },
+      depthTime: { bottom_time: 54, max_depth: 8.4 },
+      conditions: { visibility: "Average", visibility_distance: 8 },
+      equipment: {
+        starting_pressure: 189,
+        ending_pressure: 55,
+        cylinder_type: "Steel",
+        cylinder_size: 10,
+        gas_mixture: "Air",
+        oxygen: 21,
+        nitrogen: 79,
+        helium: 0,
+      },
+      experience: { feeling: "Good", buddies: "Akim" },
+    });
   });
 
   it("maps nitrox gas and blank optional strings without guessing missing numeric values", () => {

@@ -118,3 +118,7 @@ User requested committing and pushing the PADI custom-cylinder mapping and UI er
 ## 2026-09-05 17:14 PADI visibility enum error
 
 User reported PADI API create failing with `invalid input value for enum visibility: "Medium"`, noted there are Low/Average/High values, and pointed to `padi-log-backup-pretty.json`.
+
+## 2026-09-05 17:18 Implement PADI log updates
+
+User requested implementing PADI log updates using the scratch example update call: mark local dives that differ from what PADI Sync fetches, show an "Update to PADI" button, show a hint on the Integrations page that opposite update from PADI requires deleting the local dive and resyncing, and only update recreational dives (not PADI training dives).

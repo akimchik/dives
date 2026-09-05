@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Integration test against a real Postgres (see tests/integration/dives.test.ts's convention).
-// Covers plan Step 10 / PRD US-006: syncPadiLogbook's insert-only import, the non-blocking
+// Covers plan Step 10 / PRD US-006: syncPadiLogbook's import/linked-diff loop, the non-blocking
 // advisory lock against a concurrent double-call, and that it never triggers a dive_backup email
 // storm (createDiveFromPadi's own contract, exercised here end-to-end through the real sync loop).
 import { closeTestPool, getTestPool } from "./helpers/pg";
@@ -60,7 +60,7 @@ async function createConnectedOwner(): Promise<Owner> {
   return { id, email };
 }
 
-function padiSummary(id: number, diveLocation = "Den Osse Haven") {
+function padiSummary(id: number, diveLocation = "Den Osse Haven", overrides: Record<string, unknown> = {}) {
   return {
     id,
     log_type: "Recreational",
@@ -70,10 +70,11 @@ function padiSummary(id: number, diveLocation = "Den Osse Haven") {
     dive_date: "2026-08-30T00:00:00",
     dive_location: diveLocation,
     status: "Publish",
+    ...overrides,
   };
 }
 
-function padiDetail(id: number, diveLocation = "Den Osse Haven") {
+function padiDetail(id: number, diveLocation = "Den Osse Haven", overrides: Record<string, unknown> = {}) {
   return {
     id,
     log_type: "Recreational",
@@ -120,13 +121,18 @@ function padiDetail(id: number, diveLocation = "Den Osse Haven") {
       },
     ],
     experiences: [{ feeling: "Average", notes: "test dive", buddies: "Alexei", dive_center: "Aquabubblemakerclub" }],
+    ...overrides,
   };
 }
 
 // A small fixed logbook (3 dives, ids 1001-1003) -- fewer than the page size, so
 // syncPadiLogbook's pagination loop fetches exactly one page and stops. `locations` optionally
 // gives each id its own dive_location; ids not listed default to "Den Osse Haven".
-function makeFakeClient(ids: number[], locations: Record<number, string> = {}) {
+function makeFakeClient(
+  ids: number[],
+  locations: Record<number, string> = {},
+  detailOverrides: Record<number, Record<string, unknown>> = {},
+) {
   let pageCalls = 0;
   let detailCalls = 0;
   const locationOf = (id: number) => locations[id] ?? "Den Osse Haven";
@@ -136,11 +142,11 @@ function makeFakeClient(ids: number[], locations: Record<number, string> = {}) {
       async fetchLogbookPage(_accessToken: string, _affiliateId: string | number, { offset }: { limit?: number; offset?: number }) {
         pageCalls += 1;
         if ((offset ?? 0) > 0) return { data: { logbook_logs: [] } };
-        return { data: { logbook_logs: ids.map((id) => padiSummary(id, locationOf(id))) } };
+        return { data: { logbook_logs: ids.map((id) => padiSummary(id, locationOf(id), detailOverrides[id])) } };
       },
       async fetchLogbookDetail(_accessToken: string, _affiliateId: string | number, id: string | number) {
         detailCalls += 1;
-        return { data: { logbook_logs: [padiDetail(Number(id), locationOf(Number(id)))] } };
+        return { data: { logbook_logs: [padiDetail(Number(id), locationOf(Number(id)), detailOverrides[Number(id)])] } };
       },
     },
     calls: () => ({ pageCalls, detailCalls }),
@@ -158,6 +164,14 @@ async function notificationCount(recipientEmail: string) {
 async function diveCount(userId: string) {
   const result = await getTestPool().query("select count(*)::int as count from dives where user_id = $1", [userId]);
   return result.rows[0].count as number;
+}
+
+async function padiNeedsUpdate(userId: string, padiDiveId: number) {
+  const result = await getTestPool().query<{ padi_needs_update: boolean }>(
+    "select padi_needs_update from dives where user_id = $1 and padi_dive_id = $2",
+    [userId, padiDiveId],
+  );
+  return result.rows[0]?.padi_needs_update ?? null;
 }
 
 // This file's users have status='connected' padi_integrations rows, which
@@ -189,6 +203,7 @@ describe("syncPadiLogbook", () => {
     if (!result.ok) throw new Error("unreachable");
     expect(result.imported).toBe(3);
     expect(result.skipped).toBe(0);
+    expect(result.needsUpdate).toBe(0);
     expect(result.remaining).toBe(false);
 
     expect(await diveCount(owner.id)).toBe(3);
@@ -226,8 +241,53 @@ describe("syncPadiLogbook", () => {
     if (!second.ok) throw new Error("unreachable");
     expect(second.imported).toBe(0);
     expect(second.skipped).toBe(2);
+    expect(second.needsUpdate).toBe(0);
 
     expect(await diveCount(owner.id)).toBe(2);
+  });
+
+  it("marks an already-linked recreational dive when local fields differ from fetched PADI detail", async () => {
+    const owner = await createConnectedOwner();
+    const padiDiveId = 502101;
+    const { client } = makeFakeClient([padiDiveId]);
+
+    await syncPadiLogbook(owner, { padiClient: client });
+    await getTestPool().query(
+      "update dives set title = 'Local title changed', padi_needs_update = false where user_id = $1 and padi_dive_id = $2",
+      [owner.id, padiDiveId],
+    );
+
+    const second = await syncPadiLogbook(owner, { padiClient: client });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error("unreachable");
+    expect(second.imported).toBe(0);
+    expect(second.skipped).toBe(1);
+    expect(second.needsUpdate).toBe(1);
+    expect(await padiNeedsUpdate(owner.id, padiDiveId)).toBe(true);
+  });
+
+  it("does not mark already-linked training/course dives as updateable even when they differ", async () => {
+    const owner = await createConnectedOwner();
+    const padiDiveId = 502102;
+    const { client } = makeFakeClient(
+      [padiDiveId],
+      {},
+      { [padiDiveId]: { log_type: "Course", log_course: "Open Water Diver" } },
+    );
+
+    await syncPadiLogbook(owner, { padiClient: client });
+    await getTestPool().query(
+      "update dives set title = 'Local title changed', padi_needs_update = false where user_id = $1 and padi_dive_id = $2",
+      [owner.id, padiDiveId],
+    );
+
+    const second = await syncPadiLogbook(owner, { padiClient: client });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error("unreachable");
+    expect(second.needsUpdate).toBe(0);
+    expect(await padiNeedsUpdate(owner.id, padiDiveId)).toBe(false);
   });
 
   it("returns 'Sync already in progress' for a concurrent call instead of hanging or double-importing", async () => {

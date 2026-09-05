@@ -34,6 +34,16 @@ export interface PadiCreateLogbookDiveResponse {
   };
 }
 
+export interface PadiUpdateRecreationalLogbookDiveResponse {
+  data: {
+    update_logbook_logs: { affected_rows: number };
+    update_logbook_depth_time: { affected_rows: number };
+    update_logbook_conditions: { affected_rows: number };
+    update_logbook_equipment: { affected_rows: number };
+    update_logbook_experience: { affected_rows: number };
+  };
+}
+
 export function login(username: string, password: string): Promise<PadiLoginResponse>;
 
 export function refresh(refreshToken: string, idToken: string): Promise<PadiLoginResponse>;
@@ -55,5 +65,11 @@ export function createLogbookDive(
   affiliateId: string | number,
   general: Record<string, unknown>,
 ): Promise<PadiCreateLogbookDiveResponse>;
+
+export function updateRecreationalLogbookDive(
+  bearerToken: string,
+  affiliateId: string | number,
+  payload: Record<string, unknown>,
+): Promise<PadiUpdateRecreationalLogbookDiveResponse>;
 
 export function decodeIdTokenClaims(idToken: string): { affiliateId: string | undefined };

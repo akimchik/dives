@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus, Star, Waves } from "lucide-react";
+import { Plus, Star, UploadCloud, Waves } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { buttonVariants } from "@/components/ui/button";
@@ -99,6 +99,12 @@ export default async function DivesPage() {
                       {dive.title && dive.site_name ? ` · ${dive.site_name}` : ""}
                       {dive.site_location ? ` · ${dive.site_location}` : ""}
                     </span>
+                    {dive.padi_needs_update ? (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                        <UploadCloud className="size-3" aria-hidden />
+                        PADI update available
+                      </span>
+                    ) : null}
                   </span>
 
                   <span className="w-16 shrink-0 text-right text-sm tabular-nums">

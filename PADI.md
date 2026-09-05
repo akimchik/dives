@@ -1,14 +1,16 @@
 # PADI logbook sync
 
 A user connects their PADI dive-certification account, and a "Sync PADI" button on the Dashboard
-imports their PADI logbook into this app's own `dives` table. The only write-back supported today
-is **creating** a local dive in PADI from the dive detail page; updating an already-linked PADI dive
-remains out of scope.
+imports their PADI logbook into this app's own `dives` table. Write-back support is intentionally
+local-to-PADI only: unlinked local dives can be created in PADI, and linked recreational dives that
+differ from the latest sync can be updated back to PADI. Course/training dives are read-only here.
 
 Initial sync was tracked as Gitea issue [#1](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/1),
 scoped via `.omc/specs/deep-interview-padi-logbook-sync.md` and `.omc/plans/padi-logbook-sync.md`
 (workspace-local, not committed). The create-only PADI write-back is tracked as Gitea issue
 [#2](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/2).
+Update-to-PADI support for linked recreational dives is tracked as Gitea issue
+[#3](https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/3).
 
 ## Auth flow
 
@@ -46,9 +48,12 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
 5. **Sync** (`app/actions/padi.ts`'s `syncPadiAction` → `lib/padi/sync.ts`'s `syncPadiLogbook`,
    triggered by the Dashboard's "Sync PADI" button): decrypts the stored `idToken`, decodes the
    PADI affiliate id from that same token's `custom:affiliate_id` claim, and walks PADI's paginated
-   logbook GraphQL endpoint end to end, importing every not-yet-seen dive. The logbook API bearer
-   token is intentionally the idToken, not the accessToken, because PADI validates the bearer token's
-   own affiliate claim against the `affiliate-id` header.
+   logbook GraphQL endpoint end to end, importing every not-yet-seen dive. For already-linked dives
+   it fetches detail records and compares PADI's current values with the local row. Linked
+   recreational dives whose local payload differs are marked `padi_needs_update = true`; linked
+   course/training dives are never marked updateable. The logbook API bearer token is intentionally
+   the idToken, not the accessToken, because PADI validates the bearer token's own affiliate claim
+   against the `affiliate-id` header.
 6. **Create in PADI** (`app/actions/padi.ts`'s `createPadiDiveAction` →
    `lib/padi/create.ts`'s `createDiveInPadi`, triggered by the dive detail page's "Create in PADI"
    button): available only for connected users and local dives with no `padi_dive_id`. It decrypts
@@ -56,6 +61,14 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
    `https://logbook.global-prod.padi.com/api/Logbook`, and stores the returned PADI id plus raw
    PADI provenance fields on the local dive. The local row is still filtered by `user_id` when it is
    marked, so another user's dive id can never be linked.
+7. **Update to PADI** (`app/actions/padi.ts`'s `updatePadiDiveAction` →
+   `lib/padi/update.ts`'s `updateDiveInPadi`, triggered by the dive detail page's "Update to PADI"
+   button): available only for connected users, linked dives, and PADI records whose provenance says
+   `log_type = 'Recreational'` with no `log_course`. It uses the captured
+   `UpdateRecreationalDiveLog` mutation from `scratch`, updating the top-level log row plus the
+   one-row `depth_times`, `conditions`, `equipment`, and `experiences` sections. A successful update
+   clears `padi_needs_update`; updating in the opposite direction is deliberately manual: delete the
+   local linked dive and run Sync PADI again.
 
 **Rate limiting**: a failed connect attempt is rate-limited on two dimensions
 (`lib/padi/rate-limit.ts`): the calling app user (5 failed attempts / rolling hour — the user-facing
@@ -69,13 +82,16 @@ connect/sync/refresh — an unconfigured checkout still boots and serves every n
 normally. `PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS` is only ever set during an active key rotation
 (decrypt falls back to it if the current key fails), and is not a normal deployment secret.
 
-## Create-in-PADI field map
+## Create/update-in-PADI field map
 
-`lib/padi/create.ts` maps the app's existing `dives` columns into PADI's create mutation shape.
-Dates are sent as `MM/DD/YYYY`, timestamps are ISO seconds with no milliseconds, and the local site
-name becomes PADI's free-text `dive_location`. The create payload mirrors the observed browser
-request in the gitignored `scratch` file: one `general` insert object with nested `depth_times`,
-`conditions`, `equipment`, and `experiences` `data` objects.
+`lib/padi/create.ts` maps the app's existing `dives` columns into PADI's create and recreational
+update mutation shapes. Dates are sent as `MM/DD/YYYY`, timestamps are ISO seconds with no
+milliseconds, and the local site name becomes PADI's free-text `dive_location`. The create payload
+mirrors the observed browser request in the gitignored `scratch` file: one `general` insert object
+with nested `depth_times`, `conditions`, `equipment`, and `experiences` `data` objects. The update
+payload uses the same values split into `general`, `depthTime`, `conditions`, `equipment`, and
+`experience` `_set` inputs for `UpdateRecreationalDiveLog`; PADI course/training update calls are
+not implemented.
 
 Key enum translations are intentionally conservative and visible in tests:
 
@@ -92,10 +108,10 @@ Key enum translations are intentionally conservative and visible in tests:
 | `gas_mix = EAN32` | `gas_mixture = Nitrox`, `oxygen = 32`, `nitrogen = 68`, `helium = 0` |
 | Free-form `tank_info` like `2x7L, Steel 232bar` | `cylinder_type = Steel`, `cylinder_size = 14`; PADI gets only its material enum plus numeric size, never the raw custom text |
 
-Updating an existing PADI dive is intentionally not implemented. Once `padi_dive_id` is present the
-detail page hides the create button rather than offering an update path. If PADI returns a
-user-fixable enum validation error, the server action returns that message to the button toast so
-the user can edit the local dive and retry instead of seeing a generic failure.
+Once `padi_dive_id` is present the detail page hides the create button. If sync or a local edit marks
+a linked recreational dive as `padi_needs_update`, the detail page shows "Update to PADI" instead.
+If PADI returns a user-fixable enum validation error, the server action returns that message to the
+button toast so the user can edit the local dive and retry instead of seeing a generic failure.
 
 ## Import field map
 
@@ -150,11 +166,13 @@ maps to `null` (unrated), not a guessed number: unlike `entry_type`'s free-text 
 `dives.rating` has a `check (rating between 1 and 5)` constraint a wrong guess can't dodge via
 passthrough.
 
-### Mapped to new, PADI-only `dives` columns (migration `023_dives_padi_fields.sql`)
+### Mapped to PADI-only/provenance `dives` columns (migrations `023_dives_padi_fields.sql`, `025_dives_padi_update_status.sql`)
 
-These 8 columns are written exactly once, by `createDiveFromPadi`'s own insert
-(`lib/dives.ts`) — never by the ordinary `DiveInput`/`updateDive` edit path, so a manual edit of an
-imported dive can never null them out and silently break the dedup key.
+The 8 raw provenance columns are written by `createDiveFromPadi`'s import insert and by
+`createDiveInPadi` after a successful create. They are never overwritten by the ordinary
+`DiveInput`/`updateDive` edit path, so a manual edit of an imported dive can never null them out and
+silently break the dedup key. Migration 025 adds the app-side update marker columns used by sync and
+the detail page.
 
 | PADI field | `dives` column | Notes |
 |---|---|---|
@@ -166,6 +184,8 @@ imported dive can never null them out and silently break the dedup key.
 | `log_type` | `log_type` | e.g. `"Recreational"` |
 | `log_course` | `log_course` | Certification course name, if any |
 | `status` | `padi_status` | Renamed from PADI's `status` to avoid colliding with `padi_integrations.status` / `notification_queue.status` — an intentional deviation, don't "fix" it back |
+| derived local/PADI diff | `padi_needs_update` | App-side flag: true only when a linked recreational dive should be pushed to PADI |
+| sync comparison time | `padi_last_compared_at` | Set when sync compares an already-linked PADI record or a successful update clears the flag |
 
 ### Explicitly unmapped (no home, not silently dropped)
 
@@ -190,8 +210,7 @@ fails that test instead of silently importing as `null`.
 
 ## Non-goals (v1)
 
-- No updating existing PADI dives.
+- No updating PADI course/training dives; only recreational dives use the captured update mutation.
 - No automatic/scheduled sync — only user-triggered, via the Dashboard button.
-- No incremental/date-filtered sync — each sync walks the full logbook; the insert-only dedup
-  (`on conflict (user_id, padi_dive_id) do nothing`) makes repeat full syncs cheap and safely
-  resumable if a sync's 45-second wall-time budget is hit mid-run.
+- No incremental/date-filtered sync — each sync walks the full logbook; the `padi_dive_id` dedup
+  key keeps imports idempotent, and repeat syncs also refresh local-vs-PADI difference flags.

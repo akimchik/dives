@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Gauge, MapPin, Plus, Timer, Waves } from "lucide-react";
+import { Gauge, MapPin, Plus, Timer, UploadCloud, Waves } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
@@ -165,6 +165,12 @@ export default async function DashboardPage() {
                   >
                     <span className="min-w-0 flex-1 basis-48 truncate font-medium">
                       {dive.title ?? dive.site_name ?? "Unnamed site"}
+                      {dive.padi_needs_update ? (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 align-middle text-xs font-normal text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                          <UploadCloud className="size-3" aria-hidden />
+                          PADI update available
+                        </span>
+                      ) : null}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {formatDiveDate(dive.occurred_at)}

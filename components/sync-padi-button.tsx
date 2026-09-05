@@ -43,7 +43,16 @@ export function SyncPadiButton({ status }: { status: PadiSyncStatus }) {
       if (result.remaining) {
         toast.success(`Imported ${result.imported} so far — click Sync again to continue.`);
       } else if (result.imported > 0) {
-        toast.success(`Imported ${result.imported} new dive${result.imported === 1 ? "" : "s"}.`);
+        toast.success(
+          `Imported ${result.imported} new dive${result.imported === 1 ? "" : "s"}.` +
+            (result.needsUpdate > 0
+              ? ` ${result.needsUpdate} linked dive${result.needsUpdate === 1 ? " differs" : "s differ"} from PADI.`
+              : ""),
+        );
+      } else if (result.needsUpdate > 0) {
+        toast.success(
+          `${result.needsUpdate} linked dive${result.needsUpdate === 1 ? " differs" : "s differ"} from PADI.`,
+        );
       } else {
         toast.success("No new dives found.");
       }

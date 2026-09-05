@@ -8,6 +8,7 @@ import {
   fetchLogbookPage,
   login,
   refresh,
+  updateRecreationalLogbookDive,
 } from "@/lib/padi/client";
 
 function jsonResponse(body: unknown, { ok = true, status = 200 } = {}) {
@@ -155,6 +156,45 @@ describe("createLogbookDive", () => {
     const body = JSON.parse(options.body);
     expect(body.query).toContain("mutation insert_logbook_logs");
     expect(body.variables).toEqual({ general });
+    expect(result).toEqual(response);
+  });
+});
+
+describe("updateRecreationalLogbookDive", () => {
+  it("sends the captured recreational update mutation sections", async () => {
+    const response = {
+      data: {
+        update_logbook_logs: { affected_rows: 1 },
+        update_logbook_depth_time: { affected_rows: 1 },
+        update_logbook_conditions: { affected_rows: 1 },
+        update_logbook_equipment: { affected_rows: 1 },
+        update_logbook_experience: { affected_rows: 1 },
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = {
+      id: 22238544,
+      general: { log_type: "Recreational" },
+      depthTime: { bottom_time: 54 },
+      conditions: { visibility: "Low" },
+      equipment: { cylinder_type: "Steel" },
+      experience: { feeling: "Average" },
+    };
+
+    const result = await updateRecreationalLogbookDive("id-token-value", "29837190", payload);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://logbook.global-prod.padi.com/api/Logbook");
+    expect(options.headers["affiliate-id"]).toBe("29837190");
+    expect(options.headers["x-platform"]).toBe("web");
+    expect(options.headers.Authorization).toBe("Bearer id-token-value");
+
+    const body = JSON.parse(options.body);
+    expect(body.query).toContain("mutation UpdateRecreationalDiveLog");
+    expect(body.variables).toEqual(payload);
     expect(result).toEqual(response);
   });
 });

@@ -10,6 +10,7 @@ import { deletePadiIntegration, savePadiIntegration } from "@/lib/padi/integrati
 import { checkRateLimit, hashUsername, isRateLimited, recordFailedAttempt } from "@/lib/padi/rate-limit";
 import { createDiveInPadi, type CreatePadiDiveResult } from "@/lib/padi/create";
 import { syncPadiLogbook, type SyncPadiResult } from "@/lib/padi/sync";
+import { updateDiveInPadi, type UpdatePadiDiveResult } from "@/lib/padi/update";
 
 const UNAVAILABLE_ERROR = "PADI sync is temporarily unavailable. Please try again later.";
 
@@ -19,10 +20,15 @@ const UNAVAILABLE_ERROR = "PADI sync is temporarily unavailable. Please try agai
 export type PadiActionResult = { ok: true } | { ok: false; error: string };
 
 type CreatePadiDiveFailureReason = Extract<CreatePadiDiveResult, { ok: false }>["reason"];
+type UpdatePadiDiveFailureReason = Extract<UpdatePadiDiveResult, { ok: false }>["reason"];
 
 export type CreatePadiDiveActionResult =
   | { ok: true; padiDiveId: number }
   | { ok: false; error: string; reason: CreatePadiDiveFailureReason | "not_found" };
+
+export type UpdatePadiDiveActionResult =
+  | { ok: true; padiDiveId: number }
+  | { ok: false; error: string; reason: UpdatePadiDiveFailureReason | "not_found" };
 
 function revalidatePadiPaths() {
   revalidatePath("/dashboard");
@@ -111,6 +117,22 @@ export async function createPadiDiveAction(diveId: number): Promise<CreatePadiDi
   if (!dive) return { ok: false, error: "Dive not found", reason: "not_found" };
 
   const result = await createDiveInPadi(user, dive);
+  if (!result.ok) return result;
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dives");
+  revalidatePath(`/dives/${diveId}`);
+
+  return result;
+}
+
+export async function updatePadiDiveAction(diveId: number): Promise<UpdatePadiDiveActionResult> {
+  const user = await requireUser();
+  const dive = await getDive(user.id, diveId);
+
+  if (!dive) return { ok: false, error: "Dive not found", reason: "not_found" };
+
+  const result = await updateDiveInPadi(user, dive);
   if (!result.ok) return result;
 
   revalidatePath("/dashboard");

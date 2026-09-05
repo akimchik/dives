@@ -50,6 +50,9 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
       const result = await disconnectPadiAction();
 
       if (result.ok) {
+        setUsername("");
+        setPassword("");
+        setShowReconnectForm(false);
         toast.success("PADI disconnected.");
         router.refresh();
       } else {
@@ -86,9 +89,15 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
   return (
     <form onSubmit={handleConnect} className="flex flex-col gap-4">
       {status?.status === "needs_reconnect" ? (
-        <p className="text-sm text-destructive">
-          Your PADI connection needs to be reconnected. Enter your PADI login again below.
-        </p>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-destructive">
+            Your PADI connection needs to be reconnected. Enter your PADI login again below.
+          </p>
+          <Button type="button" variant="outline" disabled={isPending} onClick={handleDisconnect} className="w-fit">
+            {isPending ? <Loader2 className="animate-spin" /> : null}
+            Forget saved PADI connection
+          </Button>
+        </div>
       ) : null}
       {status?.status === "connected" && showReconnectForm ? (
         <p className="text-sm text-muted-foreground">
@@ -131,7 +140,7 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
       </p>
       <Button type="submit" disabled={isPending || !username || !password} className="w-fit">
         {isPending ? <Loader2 className="animate-spin" /> : null}
-        Connect PADI
+        {status ? "Reconnect PADI" : "Connect PADI"}
       </Button>
     </form>
   );

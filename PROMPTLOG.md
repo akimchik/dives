@@ -62,3 +62,11 @@ For the 403 itself: probed `logbook.global-prod.padi.com` from this dev machine 
 Both header variants 403'd identically, which ruled out headers entirely and pointed at the token itself. Cross-checked the JWT `kid` in the browser-captured logbook `Authorization: Bearer` header (`scratch` line 94) against the login response's `idToken`/`accessToken` `kid`s (`scratch` line 26) -- the captured request sends the **idToken**, not the OAuth `accessToken` this app's client was using. Added a third variant to `debug-logbook.mjs` trying the idToken as bearer against the real API with real creds: 200 OK with a real logbook page back, vs. the confirmed 403 for the accessToken. Root cause: PADI's logbook API validates the bearer JWT's own `custom:affiliate_id` claim against the `affiliate-id` header/variable -- only the idToken carries that claim, so the accessToken can never satisfy this check no matter what else is sent.
 
 Fixed in `lib/padi/sync.ts` (renamed `accessToken` -> `bearerToken`, sourced from `id_token_encrypted` instead of `access_token_encrypted`) and `scripts/padi/client.mjs`/`client.d.mts` (`fetchLogbookPage`/`fetchLogbookDetail` params renamed and documented). `access_token_encrypted` stays in the schema and keeps getting written by connect/refresh -- it's still part of PADI's real token set, just never read for the logbook calls. The token-refresh CronJob already re-persists a fresh `id_token_encrypted` every cycle, so no migration or refresh-job change was needed. Added `padi:debug-logbook` to `package.json` so `knip` (rule 6) recognizes the new debug script as an entry point instead of flagging it and its `LOGBOOK_PAGE_QUERY` import as unused.
+
+## 2026-09-05 11:00 PADI token refresh and reconnect failure
+
+User reported token rotation failing with TypeError reading accessToken in scripts/padi/token-refresh.mjs, no failure email is sent, and Sync PADI only shows “PADI needs to be reconnected” without a reset/reconnect button.
+
+## 2026-09-05 13:10 Gitea issue number provided
+
+User answered that the existing Gitea issue is #1 for the PADI token rotation/reconnect bug.

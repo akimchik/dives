@@ -7,6 +7,34 @@ import { PadiApiError, refresh as defaultRefresh } from "./client.mjs";
 // breaker in processPadiTokenRefresh below.
 const DEFAULT_DECRYPT_FAILURE_THRESHOLD = 3;
 
+function normalizeTokenSet(response) {
+  const candidate = response?.tokens ?? response;
+  if (
+    candidate &&
+    typeof candidate.accessToken === "string" &&
+    typeof candidate.refreshToken === "string" &&
+    typeof candidate.idToken === "string" &&
+    Number.isFinite(Number(candidate.expiresIn))
+  ) {
+    return {
+      accessToken: candidate.accessToken,
+      refreshToken: candidate.refreshToken,
+      idToken: candidate.idToken,
+      expiresIn: Number(candidate.expiresIn),
+    };
+  }
+  return null;
+}
+
+function refreshResponseSaysTokenRejected(response) {
+  const text = JSON.stringify(response ?? {}).toLowerCase();
+  const rejectionWords = "invalid|expired|revoked|rejected|unauthorized|not authorized|forbidden";
+  const tokenWords = "refresh|token";
+  return new RegExp(`(?:${rejectionWords}).*(?:${tokenWords})|(?:${tokenWords}).*(?:${rejectionWords})`).test(
+    text,
+  );
+}
+
 // Refreshes a single row's tokens. A decrypt failure is classified as infrastructure (never touches
 // status, never enqueues). Of the refresh call's failures, ONLY a genuine PADI rejection (HTTP 401 --
 // "your refresh token is no longer valid") is allowed to flip the row to needs_reconnect. A network
@@ -41,7 +69,18 @@ async function refreshRow(client, row, { encryptionKey, previousEncryptionKey, r
     return { outcome: "refreshFailure", userId, error };
   }
 
-  const tokens = response.tokens;
+  const tokens = normalizeTokenSet(response);
+  if (!tokens) {
+    if (refreshResponseSaysTokenRejected(response)) {
+      return { outcome: "needsReconnect", userId, email: row.email };
+    }
+    return {
+      outcome: "refreshFailure",
+      userId,
+      error: new Error("PADI refresh response did not include a usable token set"),
+    };
+  }
+
   await client.query(
     `
       update padi_integrations
@@ -77,13 +116,19 @@ async function markNeedsReconnect(client, userId, email) {
       `
         update padi_integrations
         set status = 'needs_reconnect', needs_reconnect_at = now(), updated_at = now()
-        where user_id = $1
+        where user_id = $1 and status = 'connected'
         returning needs_reconnect_at
       `,
       [userId],
     );
 
-    const needsReconnectAt = new Date(result.rows[0].needs_reconnect_at).toISOString();
+    const updatedRow = result.rows[0];
+    if (!updatedRow) {
+      await client.query("commit");
+      return;
+    }
+
+    const needsReconnectAt = new Date(updatedRow.needs_reconnect_at).toISOString();
 
     await enqueueNotification(client, {
       recipientEmail: email,

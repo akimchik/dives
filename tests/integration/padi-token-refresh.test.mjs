@@ -132,6 +132,31 @@ describe("processPadiTokenRefresh", () => {
     expect(new Date(after.expires_at).getTime()).toBeGreaterThan(Date.now() + 3_000_000);
   });
 
+  it("accepts a flat token set from the refresh endpoint", async () => {
+    const user = await createUser();
+    await insertDueIntegration(user.id);
+
+    const result = await processPadiTokenRefresh(client, {
+      encryptionKey,
+      refreshFn: async () => ({
+        accessToken: "flat-access-token",
+        refreshToken: "flat-refresh-token",
+        idToken: "flat-id-token",
+        expiresIn: "3600",
+      }),
+    });
+
+    expect(result.refreshed).toBe(1);
+    expect(result.needsReconnect).toBe(0);
+    expect(result.refreshFailures).toBe(0);
+
+    const after = await integrationOf(user.id);
+    expect(after.status).toBe("connected");
+    expect(decryptField(user.id, "access", after.access_token_encrypted)).toBe("flat-access-token");
+    expect(decryptField(user.id, "refresh", after.refresh_token_encrypted)).toBe("flat-refresh-token");
+    expect(decryptField(user.id, "id", after.id_token_encrypted)).toBe("flat-id-token");
+  });
+
   it("sets needs_reconnect and enqueues exactly one padi_reconnect row on a rejected refresh", async () => {
     const user = await createUser();
     await insertDueIntegration(user.id);
@@ -235,6 +260,44 @@ describe("processPadiTokenRefresh", () => {
 
     expect(result.decryptFailures).toBe(1);
     expect(result.needsReconnect).toBe(0);
+
+    const after = await integrationOf(user.id);
+    expect(after.status).toBe("connected");
+    expect(after.needs_reconnect_at).toBeNull();
+    expect(await reconnectRowsOf(user.email)).toHaveLength(0);
+  });
+
+  it("treats a 2xx refresh-token rejection body as needs_reconnect instead of throwing", async () => {
+    const user = await createUser();
+    await insertDueIntegration(user.id);
+
+    const result = await processPadiTokenRefresh(client, {
+      encryptionKey,
+      refreshFn: async () => ({ message: "Refresh token expired" }),
+    });
+
+    expect(result.refreshed).toBe(0);
+    expect(result.needsReconnect).toBe(1);
+    expect(result.refreshFailures).toBe(0);
+
+    const after = await integrationOf(user.id);
+    expect(after.status).toBe("needs_reconnect");
+    expect(after.needs_reconnect_at).not.toBeNull();
+    expect(await reconnectRowsOf(user.email)).toHaveLength(1);
+  });
+
+  it("classifies a malformed successful refresh body as transient instead of crashing the cronjob", async () => {
+    const user = await createUser();
+    await insertDueIntegration(user.id);
+
+    const result = await processPadiTokenRefresh(client, {
+      encryptionKey,
+      refreshFn: async () => ({ message: "temporarily unavailable" }),
+    });
+
+    expect(result.refreshed).toBe(0);
+    expect(result.needsReconnect).toBe(0);
+    expect(result.refreshFailures).toBe(1);
 
     const after = await integrationOf(user.id);
     expect(after.status).toBe("connected");

@@ -29,8 +29,12 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
    expires in ~1 hour. The cronjob selects every `padi_integrations` row due within the next 35
    minutes, decrypts the stored `refreshToken`/`idToken`, and POSTs them to
    `https://api.global-prod.padi.com/auth/api/oauth/refresh`. On success, the new token set is
-   re-encrypted and stored. **The Dashboard sync action never refreshes tokens itself** — that's the
-   cronjob's exclusive responsibility, avoiding a refresh-token-rotation race between the two.
+   normalized (the observed nested `{ tokens: ... }` shape and a flat token-set shape are both
+   accepted), re-encrypted, and stored. A 2xx JSON body that does not contain tokens is never allowed
+   to crash the cronjob: explicit refresh-token rejection text is handled as a reconnect event, while
+   unrelated malformed bodies are logged as transient refresh failures. **The Dashboard sync action
+   never refreshes tokens itself** — that's the cronjob's exclusive responsibility, avoiding a
+   refresh-token-rotation race between the two.
 4. **Reconnect on failure**: if PADI rejects a refresh (the refresh token itself died), the row is
    marked `status = 'needs_reconnect'` and the user receives a "reconnect your PADI account" email
    (`padi_reconnect` notification type, added to the existing `notification_queue` alongside

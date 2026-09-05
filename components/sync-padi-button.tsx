@@ -34,6 +34,9 @@ export function SyncPadiButton({ status }: { status: PadiSyncStatus }) {
 
       if (!result.ok) {
         toast.error(result.error);
+        if (result.reason === "reconnect_required" || result.reason === "not_connected") {
+          router.refresh();
+        }
         return;
       }
 

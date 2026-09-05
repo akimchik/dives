@@ -257,7 +257,8 @@ login/password to PADI's own login endpoint once (server-side, password never
 stored), encrypts the returned tokens (`scripts/padi/crypto.mjs`,
 `PADI_TOKEN_ENCRYPTION_KEY`), and a `padi-token-refresh` CronJob
 (`padiTokenRefresh.schedule`, default `*/30 * * * *`) keeps the access token
-fresh via `scripts/padi/token-refresh.mjs`. A "Sync PADI" button
+fresh via `scripts/padi/token-refresh.mjs`; malformed 2xx refresh bodies are
+classified instead of being allowed to crash the CronJob. A "Sync PADI" button
 (`syncPadiAction` → `lib/padi/sync.ts`) imports the user's full logbook into
 `dives`, insert-only and deduped by `padi_dive_id`. Requires
 `PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see

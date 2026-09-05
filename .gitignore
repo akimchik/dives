@@ -23,3 +23,5 @@ dev-values.yaml
 TODO.md
 scratch
 padi-log-backup*.json
+
+.omx/

@@ -23,6 +23,10 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isPending, startTransition] = useTransition();
+  // Lets an already-connected user re-enter credentials directly (e.g. after a password change,
+  // or to rule out stale/bad creds) without first clicking Disconnect and losing the connected
+  // state in between.
+  const [showReconnectForm, setShowReconnectForm] = useState(false);
 
   function handleConnect(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,6 +36,7 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
 
       if (result.ok) {
         setPassword("");
+        setShowReconnectForm(false);
         toast.success("PADI connected.");
         router.refresh();
       } else {
@@ -53,16 +58,27 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
     });
   }
 
-  if (status?.status === "connected") {
+  if (status?.status === "connected" && !showReconnectForm) {
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Connected since {new Date(status.connectedAt).toLocaleDateString()}.
         </p>
-        <Button type="button" variant="outline" disabled={isPending} onClick={handleDisconnect} className="w-fit">
-          {isPending ? <Loader2 className="animate-spin" /> : null}
-          Disconnect PADI
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isPending}
+            onClick={() => setShowReconnectForm(true)}
+            className="w-fit"
+          >
+            Reconnect PADI
+          </Button>
+          <Button type="button" variant="outline" disabled={isPending} onClick={handleDisconnect} className="w-fit">
+            {isPending ? <Loader2 className="animate-spin" /> : null}
+            Disconnect PADI
+          </Button>
+        </div>
       </div>
     );
   }
@@ -72,6 +88,18 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
       {status?.status === "needs_reconnect" ? (
         <p className="text-sm text-destructive">
           Your PADI connection needs to be reconnected. Enter your PADI login again below.
+        </p>
+      ) : null}
+      {status?.status === "connected" && showReconnectForm ? (
+        <p className="text-sm text-muted-foreground">
+          Re-enter your PADI login below.{" "}
+          <button
+            type="button"
+            onClick={() => setShowReconnectForm(false)}
+            className="underline underline-offset-2"
+          >
+            Cancel
+          </button>
         </p>
       ) : null}
       <div className="flex flex-col gap-1.5">

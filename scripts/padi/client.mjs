@@ -4,7 +4,7 @@ const PADI_LOGBOOK_BASE_URL = "https://logbook.global-prod.padi.com";
 // Public OAuth client id -- not a secret, per the scratch reference file's own note.
 export const PADI_CLIENT_ID = "7l7c6rgndimr802cfhva7akdsh";
 
-const LOGBOOK_PAGE_QUERY = `query logbook_logs($affiliate_id: Int!, $limit: Int, $offset: Int) {
+export const LOGBOOK_PAGE_QUERY = `query logbook_logs($affiliate_id: Int!, $limit: Int, $offset: Int) {
   logbook_logs(
     where: {affiliate_id: {_eq: $affiliate_id}}
     order_by: {dive_date: desc, id: desc}

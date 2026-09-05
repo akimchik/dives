@@ -21,3 +21,5 @@ dev-values.yaml
 !dev-values.example.yaml
 .claude/
 TODO.md
+scratch
+padi-log-backup*.json

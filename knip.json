@@ -1,6 +1,8 @@
 {
   "ignore": [
     "components/**",
-    "scripts/env.d.mts"
+    "scripts/env.d.mts",
+    "scripts/padi/crypto.d.mts",
+    "scripts/padi/client.d.mts"
   ]
 }

@@ -162,3 +162,36 @@ export function renderDiveBackupEmail({ event, dive }) {
     text: bodyText,
   };
 }
+
+// A deleted/never-connected dive still needs somewhere to send the user, so this degrades the same
+// way diveUrl() does when NEXT_PUBLIC_BASE_URL is unset -- no link at all rather than a broken one.
+// The /settings/integrations route itself doesn't exist yet (a later story builds it), but the link
+// should point there regardless -- it will resolve once that story ships.
+function integrationsUrl() {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim().replace(/\/$/, "");
+  if (!baseUrl) return null;
+  return `${baseUrl}/settings/integrations`;
+}
+
+// padi_reconnect's payload is `{ userId }`, written by scripts/padi-token-refresh.mjs when a stored
+// PADI refresh token is rejected. There's no per-row attachment for this type (unlike dive_backup).
+export function renderPadiReconnectTemplate(_payload) {
+  const url = integrationsUrl();
+
+  const bodyHtml =
+    `<p>Your PADI connection needs to be reconnected. We couldn't refresh your PADI login, ` +
+    `so automatic dive syncing is paused until you reconnect.</p>` +
+    (url ? `<p><a href="${escapeHtml(url)}">Reconnect PADI</a></p>` : "");
+
+  const bodyText = [
+    "Your PADI connection needs to be reconnected. We couldn't refresh your PADI login, " +
+      "so automatic dive syncing is paused until you reconnect.",
+    ...(url ? [``, `Reconnect PADI: ${url}`] : []),
+  ].join("\n");
+
+  return {
+    subject: "Your PADI connection needs to be reconnected",
+    html: wrapHtml(bodyHtml),
+    text: bodyText,
+  };
+}

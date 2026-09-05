@@ -1,0 +1,273 @@
+[
+  {
+    "id": 22238544,
+    "log_type": "Recreational",
+    "log_course": null,
+    "log_number": null,
+    "dive_type": "BeachShore",
+    "dive_title": "Left from mol",
+    "dive_date": "2026-08-30T00:00:00",
+    "dive_location": "Den Osse Haven",
+    "memsys_member_number": 0,
+    "status": "Publish",
+    "adventure_dive": null,
+    "depth_times": [
+      {
+        "max_depth": 8.8,
+        "bottom_time": 54,
+        "time_in": null,
+        "time_out": null
+      }
+    ],
+    "skills": [
+      {
+        "dive_skills": []
+      }
+    ],
+    "conditions": [
+      {
+        "water_type": "Salt",
+        "body_of_water": "Ocean",
+        "weather": "Rainy",
+        "air_temp": 20.0,
+        "surface_water_temp": 20.0,
+        "bottom_water_temp": 20.0,
+        "visibility": "Low",
+        "visibility_distance": 4.0,
+        "wave_condition": "SmallWaves",
+        "current": "SomeCurrent",
+        "surge": "MediumSurge"
+      }
+    ],
+    "equipment": [
+      {
+        "suit_type": "FullSuit_7mm",
+        "weight": 6.0,
+        "weight_type": "Good",
+        "additional_equipment": [
+          "Hood",
+          "Boots"
+        ],
+        "cylinder_type": "Steel",
+        "cylinder_size": 14.0,
+        "gas_mixture": "Air",
+        "oxygen": 21,
+        "nitrogen": 79,
+        "helium": 0,
+        "starting_pressure": 185.0,
+        "ending_pressure": 94.0
+      }
+    ],
+    "experiences": [
+      {
+        "feeling": "Average",
+        "notes": "2nd time 2x7 twinset. Wing feels big and flapping, maybe due to light underweight. Compass navigation was shitty: we made 2 circles into the shore in first 1/2 of the time. I maybe go leftish due to free left port on the twinset.",
+        "buddies": "Alexei and Eric",
+        "dive_center": "Aquabubblemakerclub "
+      }
+    ]
+  },
+  {
+    "id": 22218990,
+    "log_type": "Recreational",
+    "log_course": null,
+    "log_number": null,
+    "dive_type": "BeachShore",
+    "dive_title": "2-de duik by Zeeland weekend ",
+    "dive_date": "2026-08-29T00:00:00",
+    "dive_location": "Den Osse Nieuwe Kerkweg",
+    "memsys_member_number": 0,
+    "status": "Publish",
+    "adventure_dive": null,
+    "depth_times": [
+      {
+        "max_depth": 13.8,
+        "bottom_time": 55,
+        "time_in": null,
+        "time_out": null
+      }
+    ],
+    "skills": [
+      {
+        "dive_skills": []
+      }
+    ],
+    "conditions": [
+      {
+        "water_type": "Salt",
+        "body_of_water": "Ocean",
+        "weather": "Rainy",
+        "air_temp": 20.0,
+        "surface_water_temp": 20.0,
+        "bottom_water_temp": 20.0,
+        "visibility": "Low",
+        "visibility_distance": 4.0,
+        "wave_condition": "NoWaves",
+        "current": "SomeCurrent",
+        "surge": "SomeSurge"
+      }
+    ],
+    "equipment": [
+      {
+        "suit_type": "FullSuit_7mm",
+        "weight": 6.5,
+        "weight_type": "Good",
+        "additional_equipment": [
+          "Hood",
+          "Gloves",
+          "Boots"
+        ],
+        "cylinder_type": "Steel",
+        "cylinder_size": 14.0,
+        "gas_mixture": "Air",
+        "oxygen": 21,
+        "nitrogen": 79,
+        "helium": 0,
+        "starting_pressure": 201.0,
+        "ending_pressure": 96.0
+      }
+    ],
+    "experiences": [
+      {
+        "feeling": "Good",
+        "notes": "Eerste keer met twinset, begin 4 kilo -- was light, by end Alex had 2.5 kilo gevonden dan was erg goed!!!",
+        "buddies": "Alex",
+        "dive_center": "Aquabubblemakerclub"
+      }
+    ]
+  },
+  {
+    "id": 17699140,
+    "log_type": "Training",
+    "log_course": "Rescue",
+    "log_number": 11,
+    "dive_type": "BeachShore",
+    "dive_title": "Open Water Rescue Scenario 2",
+    "dive_date": "2025-09-14T00:00:00",
+    "dive_location": "Vinkeveen Zandeiland 4",
+    "memsys_member_number": 524631,
+    "status": "Verified",
+    "adventure_dive": null,
+    "depth_times": [
+      {
+        "max_depth": 8.0,
+        "bottom_time": 30,
+        "time_in": null,
+        "time_out": null
+      }
+    ],
+    "skills": [
+      {
+        "dive_skills": [
+          "missing diver",
+          "unresponsive diver at the surface",
+          "exiting the unresponsive diver",
+          "first aid for pressure",
+          "unresponsive diver"
+        ]
+      }
+    ],
+    "conditions": [
+      {
+        "water_type": null,
+        "body_of_water": null,
+        "weather": null,
+        "air_temp": null,
+        "surface_water_temp": null,
+        "bottom_water_temp": null,
+        "visibility": null,
+        "visibility_distance": null,
+        "wave_condition": null,
+        "current": null,
+        "surge": null
+      }
+    ],
+    "equipment": [
+      {
+        "suit_type": null,
+        "weight": null,
+        "weight_type": null,
+        "additional_equipment": [],
+        "cylinder_type": null,
+        "cylinder_size": null,
+        "gas_mixture": null,
+        "oxygen": null,
+        "nitrogen": null,
+        "helium": null,
+        "starting_pressure": null,
+        "ending_pressure": null
+      }
+    ],
+    "experiences": [
+      {
+        "feeling": null,
+        "notes": null,
+        "buddies": null,
+        "dive_center": null
+      }
+    ]
+  },
+  {
+    "id": 12179056,
+    "log_type": "Training",
+    "log_course": "Advanced",
+    "log_number": 9,
+    "dive_type": "BeachShore",
+    "dive_title": "Adventure Elective Dive 3",
+    "dive_date": "2024-04-12T23:45:05",
+    "dive_location": "Sharm el Naga",
+    "memsys_member_number": 328923,
+    "status": "Verified",
+    "adventure_dive": "Night Diving",
+    "depth_times": [
+      {
+        "max_depth": 17.4,
+        "bottom_time": 37,
+        "time_in": null,
+        "time_out": null
+      }
+    ],
+    "skills": [],
+    "conditions": [
+      {
+        "water_type": "Salt",
+        "body_of_water": "Ocean",
+        "weather": "Partly Cloudy",
+        "air_temp": 24.0,
+        "surface_water_temp": 23.9,
+        "bottom_water_temp": 23.3,
+        "visibility": "Average",
+        "visibility_distance": 7.0,
+        "wave_condition": "SmallWaves",
+        "current": "NoCurrent",
+        "surge": "SomeSurge"
+      }
+    ],
+    "equipment": [
+      {
+        "suit_type": "FullSuit_7mm",
+        "weight": 12.0,
+        "weight_type": "Good",
+        "additional_equipment": [
+          "Boots"
+        ],
+        "cylinder_type": "Aluminum",
+        "cylinder_size": 12.0,
+        "gas_mixture": "Enriched",
+        "oxygen": 30,
+        "nitrogen": null,
+        "helium": null,
+        "starting_pressure": 200.0,
+        "ending_pressure": 50.0
+      }
+    ],
+    "experiences": [
+      {
+        "feeling": "Good",
+        "notes": "Night dive was echt goed! Lion-fishes everywhere, attracted by light (should attack objects in light), keep hands  infront where you see them, to not smash the lion fish accidentally!",
+        "buddies": "Max",
+        "dive_center": "ABC Dive"
+      }
+    ]
+  }
+]

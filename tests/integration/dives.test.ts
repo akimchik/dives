@@ -8,6 +8,9 @@ import { afterAll, describe, expect, it } from "vitest";
 // dive_backup notification each mutation enqueues inside its own transaction. Rows are keyed by a
 // fresh random user per case, so this file is safe to run alongside the other integration files.
 import { closeTestPool, getTestPool } from "./helpers/pg";
+// Type-only: the 8 PADI-only columns createDiveFromPadi writes (v2 data-loss-bug fix -- see
+// lib/dives.ts's comment on that function and DiveInput/diveValues()/updateDive).
+import type { PadiOnlyFields } from "@/lib/padi/field-map";
 
 // templates.mjs is the consumer of the payload written here -- asserting against it directly is what
 // proves the flat `{ event, dive: { ...columns, site_name, ... } }` contract end-to-end, rather than
@@ -18,6 +21,7 @@ import { orderedDiveColumns, renderDiveBackupEmail } from "../../scripts/notific
 
 const {
   createDive,
+  createDiveFromPadi,
   deleteDive,
   findOrCreateDiveSite,
   getDive,
@@ -88,6 +92,22 @@ function diveInput(overrides: Record<string, unknown> = {}) {
     depthProfileRaw: "0,0\n60,12.4\n",
     ...overrides,
   } as Parameters<typeof createDive>[1];
+}
+
+// Fixture for the 8 PADI-only columns. padi_dive_id is randomized per call so tests can share the
+// database without colliding on the (user_id, padi_dive_id) partial unique index.
+function padiFields(overrides: Partial<PadiOnlyFields> = {}): PadiOnlyFields {
+  return {
+    padi_dive_id: Math.floor(Math.random() * 1_000_000_000),
+    dive_number: 42,
+    padi_member_number: 123456,
+    adventure_dive: false,
+    dive_type: "Open Water",
+    log_type: "logged",
+    log_course: null,
+    padi_status: "verified",
+    ...overrides,
+  };
 }
 
 async function backupRows(diveId: number, event: string) {
@@ -259,6 +279,111 @@ describe("dive mutations enqueue a dive_backup notification in the same transact
     expect(rows[0].payload.dive.id).toBe(dive.id);
     expect(rows[0].payload.dive.site_name).toBe(siteName);
     expect(rows[0].payload.dive.bottom_time_minutes).toBe(44);
+  });
+});
+
+// Covers plan Step 8-9 / US-005: createDiveFromPadi is a standalone bulk-import insert path that
+// writes the 8 PADI-only columns exactly once, and never through DiveInput/diveValues()/updateDive's
+// shared write path -- the direct regression coverage for the v2 data-loss bug found during planning
+// review (extending that shared path with the PADI columns silently nulled padi_dive_id on an
+// ordinary edit).
+describe("createDiveFromPadi (PADI logbook bulk-import write path)", () => {
+  it("inserts a dive with the 8 PADI-only columns, readable back via getDive and listDives", async () => {
+    const owner = await createOwner();
+    const fields = padiFields();
+
+    const result = await createDiveFromPadi(owner, diveInput({ title: "Imported dive" }), fields);
+    expect(result).toEqual({ inserted: true, id: expect.any(Number) });
+    if (!result.inserted) throw new Error("expected insert");
+
+    const stored = await getDive(owner.id, result.id);
+    expect(stored?.title).toBe("Imported dive");
+    expect(stored?.padi_dive_id).toBe(fields.padi_dive_id);
+    expect(stored?.dive_number).toBe(fields.dive_number);
+    expect(stored?.padi_member_number).toBe(fields.padi_member_number);
+    expect(stored?.adventure_dive).toBe(fields.adventure_dive);
+    expect(stored?.dive_type).toBe(fields.dive_type);
+    expect(stored?.log_type).toBe(fields.log_type);
+    expect(stored?.log_course).toBe(fields.log_course);
+    expect(stored?.padi_status).toBe(fields.padi_status);
+
+    const listed = (await listDives(owner.id)).find((dive) => dive.id === result.id);
+    expect(listed?.padi_dive_id).toBe(fields.padi_dive_id);
+    expect(listed?.dive_number).toBe(fields.dive_number);
+  });
+
+  it("returns {inserted: false} and does not duplicate on a second call with the same padi_dive_id", async () => {
+    const owner = await createOwner();
+    const fields = padiFields();
+
+    const first = await createDiveFromPadi(owner, diveInput(), fields);
+    expect(first.inserted).toBe(true);
+
+    const second = await createDiveFromPadi(
+      owner,
+      diveInput({ notes: "duplicate re-sync attempt" }),
+      fields,
+    );
+    expect(second).toEqual({ inserted: false });
+
+    const rows = await getTestPool().query(
+      "select count(*)::int as count from dives where user_id = $1 and padi_dive_id = $2",
+      [owner.id, fields.padi_dive_id],
+    );
+    expect(rows.rows[0].count).toBe(1);
+  });
+
+  it("regression (v2 data-loss bug): an ordinary updateDive edit never nulls padi_dive_id or the other PADI columns", async () => {
+    const owner = await createOwner();
+    const fields = padiFields();
+
+    const created = await createDiveFromPadi(owner, diveInput({ title: "Original PADI title" }), fields);
+    expect(created.inserted).toBe(true);
+    if (!created.inserted) throw new Error("expected insert");
+
+    // Simulates a human editing the dive's title/notes in the ordinary UI form -- the untouched
+    // updateDive path, which never sets the 8 PADI-only columns in its SET clause.
+    await updateDive(owner, created.id, diveInput({ title: "Edited by hand", notes: "human edit" }));
+
+    const stored = await getDive(owner.id, created.id);
+    expect(stored?.title).toBe("Edited by hand");
+    expect(stored?.notes).toBe("human edit");
+    // Unchanged: still exactly what createDiveFromPadi originally set, not nulled out.
+    expect(stored?.padi_dive_id).toBe(fields.padi_dive_id);
+    expect(stored?.dive_number).toBe(fields.dive_number);
+    expect(stored?.padi_member_number).toBe(fields.padi_member_number);
+    expect(stored?.adventure_dive).toBe(fields.adventure_dive);
+    expect(stored?.dive_type).toBe(fields.dive_type);
+    expect(stored?.log_type).toBe(fields.log_type);
+    expect(stored?.log_course).toBe(fields.log_course);
+    expect(stored?.padi_status).toBe(fields.padi_status);
+  });
+
+  it("enqueues no dive_backup notification on import, but the next ordinary edit enqueues exactly one", async () => {
+    const owner = await createOwner();
+    const fields = padiFields();
+
+    async function backupCount() {
+      const result = await getTestPool().query<{ count: number }>(
+        "select count(*)::int as count from notification_queue where recipient_email = $1 and notification_type = 'dive_backup'",
+        [owner.email],
+      );
+      return result.rows[0].count;
+    }
+
+    expect(await backupCount()).toBe(0);
+
+    const created = await createDiveFromPadi(owner, diveInput(), fields);
+    expect(created.inserted).toBe(true);
+    if (!created.inserted) throw new Error("expected insert");
+
+    // Bulk-importing must not enqueue a backup email per dive -- that would storm the queue on a
+    // sync of dozens/hundreds of logged dives.
+    expect(await backupCount()).toBe(0);
+
+    // The first ordinary edit, via the untouched updateDive path, still enqueues a normal backup.
+    await updateDive(owner, created.id, diveInput({ notes: "first manual edit" }));
+    expect(await backupCount()).toBe(1);
   });
 });
 

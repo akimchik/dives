@@ -1,0 +1,42 @@
+export declare const PADI_CLIENT_ID: string;
+
+export declare class PadiApiError extends Error {
+  status: number | undefined;
+  constructor(message: string, status?: number);
+}
+
+export interface PadiTokenSet {
+  idToken: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+}
+
+export interface PadiLoginResponse {
+  tokens: PadiTokenSet;
+}
+
+export interface PadiLogbookLogsPage {
+  data: {
+    logbook_logs: unknown[];
+  };
+}
+
+export function login(username: string, password: string): Promise<PadiLoginResponse>;
+
+export function refresh(refreshToken: string, idToken: string): Promise<PadiLoginResponse>;
+
+export function fetchLogbookPage(
+  accessToken: string,
+  affiliateId: string | number,
+  options: { limit?: number; offset?: number },
+): Promise<PadiLogbookLogsPage>;
+
+export function fetchLogbookDetail(
+  accessToken: string,
+  affiliateId: string | number,
+  id: string | number,
+): Promise<PadiLogbookLogsPage>;
+
+export function decodeIdTokenClaims(idToken: string): { affiliateId: string | undefined };

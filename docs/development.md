@@ -232,12 +232,14 @@ emails:
 
 - **Combinable** (`new_user_signup`): all of a recipient's rows are collapsed
   into one email by `renderCombinedEmail`, and marked `sent`/retried together.
-- **Not combinable** (`dive_backup`): each row is its own email, claimed, sent
-  and marked individually. A dive backup carries a JSON + CSV snapshot of the
-  dive as attachments (built in the send path, passed through `sendMail`'s
-  optional `attachments` argument to nodemailer), which a combined email has no
-  way to represent. Its payload is
+- **Not combinable** (`dive_backup`, `padi_reconnect`): each row is its own
+  email, claimed, sent and marked individually. A dive backup carries a JSON +
+  CSV snapshot of the dive as attachments (built in the send path, passed
+  through `sendMail`'s optional `attachments` argument to nodemailer), which a
+  combined email has no way to represent. Its payload is
   `{ event: "create" | "edit" | "delete", dive: { ...flat column snapshot } }`.
+  `padi_reconnect` (see [PADI.md](../PADI.md)) has no attachments; its payload
+  is just `{ userId }`.
 
 Both the email body and the CSV order columns through `templates.mjs`'s
 `orderedDiveColumns` — known `dives` columns first in a fixed reading order,
@@ -246,6 +248,21 @@ write, so the payload's own key order coming back out of the queue is *not* the
 order the server action wrote it in; ordering there instead keeps every backup's
 columns identical. A row whose `notification_type` no renderer handles throws
 rather than being silently marked sent with no email.
+
+## PADI logbook sync
+
+See [PADI.md](../PADI.md) for the full auth-flow explanation and field map.
+In short: `app/actions/padi.ts`'s `connectPadiAction` relays a user's PADI
+login/password to PADI's own login endpoint once (server-side, password never
+stored), encrypts the returned tokens (`scripts/padi/crypto.mjs`,
+`PADI_TOKEN_ENCRYPTION_KEY`), and a `padi-token-refresh` CronJob
+(`padiTokenRefresh.schedule`, default `*/30 * * * *`) keeps the access token
+fresh via `scripts/padi/token-refresh.mjs`. A "Sync PADI" button
+(`syncPadiAction` → `lib/padi/sync.ts`) imports the user's full logbook into
+`dives`, insert-only and deduped by `padi_dive_id`. Requires
+`PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see
+`.env.example`); both are read lazily, so an unconfigured checkout still
+boots and serves every non-PADI page/test normally.
 
 ## Tests
 

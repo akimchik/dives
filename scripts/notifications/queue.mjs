@@ -1,5 +1,5 @@
 import { sendMail as defaultSendMail } from "../mailer.mjs";
-import { orderedDiveColumns, renderDiveBackupEmail } from "./templates.mjs";
+import { orderedDiveColumns, renderDiveBackupEmail, renderPadiReconnectTemplate } from "./templates.mjs";
 
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_GAP_MS = 1_500;
@@ -129,6 +129,16 @@ function buildDiveBackupAttachments(payload) {
 // email ever leaving is worse than a visible failure. Routes through recordFailure so it retries
 // and eventually dead-letters visibly instead.
 function buildMessage(row) {
+  if (row.notification_type === "padi_reconnect") {
+    const email = renderPadiReconnectTemplate(row.payload);
+    return {
+      to: row.recipient_email,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+    };
+  }
+
   if (row.notification_type !== "dive_backup") {
     throw new Error(`Unsupported notification_type: ${row.notification_type}`);
   }

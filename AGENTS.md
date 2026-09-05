@@ -73,19 +73,19 @@ there is no `tos_acceptance` table and no ToS gate in `lib/session.ts` — do no
 re-add `hasAcceptedTosVersion` or an `/accept-terms` redirect; every
 authenticated page would 500 against a table that doesn't exist.
 
-## GitHub issue workflow
+## Gitea issue workflow
 
-Agents doing work in this repo must track that work with a GitHub issue:
+Agents doing work in this repo must track that work with a Gitea issue:
 
 - Before starting non-trivial work, ask the user whether an issue already
   exists for the task. Don't assume — always ask first.
-- If no issue exists, create one with `gh issue create`. Write a clear
+- If no issue exists, create one with `tea` cli. Write a clear
   description of the task; if a spec or implementation plan was produced
   while scoping the work, attach or paste it into the issue body (or a
   follow-up comment).
 - Reference the issue number in every commit made for that work (e.g.
   `Fixes #42` or `Refs #42` in the commit message).
-- If the issue lives in a GitHub Project board, move its status to
+- If the issue lives in a Gitea Project board, move its status to
   "In Progress" once work begins.
 - When the work is done, do **not** close the issue or change its status
   yourself. Leave it open and ask the user to review the work and close (or

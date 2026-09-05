@@ -88,9 +88,18 @@ notifications:
   staleLockMs: "600000"
   maxAttempts: "8"
 
+# Refreshes stored PADI access tokens before their ~1-hour expiry (35-minute due window in
+# scripts/padi/token-refresh.mjs). PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS is deliberately not a values
+# key here -- it's only ever needed transiently during an active key rotation, added directly to
+# the stage's real secrets file at rotation time and removed once rotation completes.
+padiTokenRefresh:
+  schedule: "*/30 * * * *"
+
 appSecrets:
   email_host_password: "replace-with-email-host-password"
   DIVES_ADMIN_PASSWORD: "replace-with-admin-password"
+  PADI_TOKEN_ENCRYPTION_KEY: "replace-with-padi-token-encryption-key"
+  PADI_USERNAME_HASH_PEPPER: "replace-with-padi-username-hash-pepper"
 
 resources:
   requests:

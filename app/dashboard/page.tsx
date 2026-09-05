@@ -4,6 +4,7 @@ import { Gauge, MapPin, Plus, Timer, Waves } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
+import { SyncPadiButton, type PadiSyncStatus } from "@/components/sync-padi-button";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -13,6 +14,7 @@ import {
   trimNumeric,
 } from "@/lib/dive-format";
 import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } from "@/lib/dives";
+import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -76,13 +78,15 @@ function Stat({
 export default async function DashboardPage() {
   const user = await requireUser("/dashboard");
   const earliestDive = await getEarliestDiveDate(user.id);
-  const [stats, dives, activity] = await Promise.all([
+  const [stats, dives, activity, padiIntegration] = await Promise.all([
     getDiveStats(user.id),
     listDives(user.id),
     getDiveActivityByDay(user.id, activityRange(earliestDive)),
+    getPadiIntegrationStatus(user.id),
   ]);
   const recent = dives.slice(0, 5);
   const maxYears = maxCalendarYears(earliestDive, new Date());
+  const padiSyncStatus: PadiSyncStatus = padiIntegration ? padiIntegration.status : "not_connected";
 
   return (
     <AppShell email={user.email}>
@@ -92,9 +96,12 @@ export default async function DashboardPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
             <p className="text-sm text-muted-foreground">Your logbook at a glance.</p>
           </div>
-          <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
-            <Plus /> Log a dive
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <SyncPadiButton status={padiSyncStatus} />
+            <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
+              <Plus /> Log a dive
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

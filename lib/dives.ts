@@ -6,6 +6,7 @@ import type { PoolClient } from "pg";
 
 import { getPool, queryRead } from "./db";
 import { enqueueNotification } from "./notification-queue";
+import type { PadiOnlyFields } from "./padi/field-map";
 
 // Every query in this module takes the session user's id and filters on it. A dive/site id coming
 // from a URL or a form is never trusted on its own: a mutation scoped by `user_id` that matches no
@@ -75,6 +76,19 @@ export type DiveSnapshot = {
   depth_profile_raw: string | null;
   created_at: Date;
   updated_at: Date;
+  // The 8 PADI-only columns (migration 023): write-once by createDiveFromPadi's own insert, never
+  // by DiveInput/diveValues()/updateDive (see that function's comment). Restored here read-only
+  // (plan's fix B) so listDives/getDive/the dive detail page can show PADI provenance, and so a
+  // PADI-imported dive's later manual edit -- which does flow through the untouched updateDive path
+  // -- produces a backup CSV/JSON that includes them.
+  padi_dive_id: number | null;
+  dive_number: number | null;
+  padi_member_number: number | null;
+  adventure_dive: boolean | null;
+  dive_type: string | null;
+  log_type: string | null;
+  log_course: string | null;
+  padi_status: string | null;
   site_name: string | null;
   site_location: string | null;
   site_lat: number | null;
@@ -170,6 +184,14 @@ const snapshotColumns = `
   d.depth_profile_raw,
   d.created_at,
   d.updated_at,
+  d.padi_dive_id,
+  d.dive_number,
+  d.padi_member_number,
+  d.adventure_dive,
+  d.dive_type,
+  d.log_type,
+  d.log_course,
+  d.padi_status,
   s.name as site_name,
   s.location as site_location,
   s.lat as site_lat,
@@ -551,6 +573,126 @@ export async function createDive(owner: DiveOwner, input: DiveInput): Promise<Di
     await enqueueDiveBackup(client, owner, "create", snapshot);
 
     return snapshot;
+  });
+}
+
+// Bulk-import path for PADI logbook sync (a later story's syncPadiLogbook calls this once per
+// remote log record). Deliberately NOT a parameter added to createDive: reusing createDive's shared
+// write path for the 8 PADI-only columns is exactly the shape that caused the v2 data-loss bug (see
+// this module's comment on DiveInput/diveValues/updateDive above) -- an ordinary edit's `undefined`
+// for those columns would silently null them out via the existing `?? null` coercion. Instead this
+// function owns its own insert, reusing diveValues() only for the DiveInput-shaped prefix so future
+// DiveInput columns keep flowing into PADI imports automatically, and appending the 8 padiFields
+// values as a positional tail that updateDive's SET list never touches.
+//
+// dive_site_id is unconditionally null: PADI's dive_location -> dive-site join is an explicitly
+// deferred follow-up (see the plan), not implemented here.
+//
+// No backup email is enqueued here, on either the inserted or the conflict-skipped path -- bulk
+// importing dozens/hundreds of dives must not enqueue dozens/hundreds of dive_backup rows through a
+// queue tuned for one-off human edits. A PADI-imported dive gets its first backup email the normal
+// way, the next time it's edited via the ordinary, untouched updateDive path.
+export async function createDiveFromPadi(
+  owner: DiveOwner,
+  input: Partial<DiveInput>,
+  padiFields: PadiOnlyFields,
+): Promise<{ inserted: false } | { inserted: true; id: number }> {
+  return inTransaction(async (client) => {
+    // Same name-based create-or-reuse as the ordinary dive form (findOrCreateDiveSite): a PADI
+    // dive_location that matches an existing site of this user (case-insensitively) reuses it
+    // rather than duplicating it, so importing the same location across many dives converges on
+    // one dive_sites row, same as a human typing the same name into the form repeatedly would.
+    const diveSiteId = await resolveDiveSiteId(client, owner.id, input.site ?? null);
+
+    // diveValues() requires a fully-populated DiveInput -- pg throws on an `undefined` query param,
+    // so every field mapPadiLogToDive didn't set (avgDepth, rating, depthProfile, depthProfileRaw)
+    // is defaulted to null here rather than left absent. `site` itself is never read by
+    // diveValues() (it takes the already-resolved diveSiteId as a separate argument instead), so
+    // its value here is unused -- present only to satisfy DiveInput's type.
+    const fullInput: DiveInput = {
+      site: null,
+      title: input.title ?? null,
+      occurredAt: input.occurredAt as Date | string,
+      maxDepth: input.maxDepth ?? null,
+      avgDepth: input.avgDepth ?? null,
+      bottomTimeMinutes: input.bottomTimeMinutes ?? null,
+      waterTemp: input.waterTemp ?? null,
+      waterTempLow: input.waterTempLow ?? null,
+      airTemp: input.airTemp ?? null,
+      visibility: input.visibility ?? null,
+      gasMix: input.gasMix ?? null,
+      tankInfo: input.tankInfo ?? null,
+      cylinderSize: input.cylinderSize ?? null,
+      startPressure: input.startPressure ?? null,
+      endPressure: input.endPressure ?? null,
+      weight: input.weight ?? null,
+      weightFeedback: input.weightFeedback ?? null,
+      suitType: input.suitType ?? null,
+      hood: input.hood ?? null,
+      gloves: input.gloves ?? null,
+      boots: input.boots ?? null,
+      buddy: input.buddy ?? null,
+      diveShop: input.diveShop ?? null,
+      current: input.current ?? null,
+      surge: input.surge ?? null,
+      waves: input.waves ?? null,
+      weather: input.weather ?? null,
+      waterType: input.waterType ?? null,
+      bodyOfWater: input.bodyOfWater ?? null,
+      entryType: input.entryType ?? null,
+      notes: input.notes ?? null,
+      rating: input.rating ?? null,
+      depthProfile: input.depthProfile ?? null,
+      depthProfileRaw: input.depthProfileRaw ?? null,
+    };
+
+    const inserted = await client.query<{ id: number }>(
+      `
+        insert into dives (
+          user_id, dive_site_id, title, occurred_at, max_depth, avg_depth, bottom_time_minutes,
+          water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
+          start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
+          buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
+          entry_type, notes, rating, depth_profile, depth_profile_raw,
+          padi_dive_id, dive_number, padi_member_number, adventure_dive, dive_type, log_type,
+          log_course, padi_status
+        )
+        values (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
+          $36, $37, $38, $39, $40, $41, $42, $43
+        )
+        on conflict (user_id, padi_dive_id) where padi_dive_id is not null do nothing
+        returning id
+      `,
+      [
+        owner.id,
+        ...diveValues(diveSiteId, fullInput),
+        // Spelled out explicitly (not Object.values(padiFields)): several of PadiOnlyFields'
+        // properties share the same type (dive_number/padi_member_number are both integer;
+        // dive_type/log_type/log_course/padi_status are all text), so an object-key-order-dependent
+        // spread would let a future reordering of PadiOnlyFields silently swap two columns with no
+        // type error.
+        padiFields.padi_dive_id,
+        padiFields.dive_number,
+        padiFields.padi_member_number,
+        padiFields.adventure_dive,
+        padiFields.dive_type,
+        padiFields.log_type,
+        padiFields.log_course,
+        padiFields.padi_status,
+      ],
+    );
+
+    if (inserted.rows.length === 0) {
+      // The conflict-skip path can leave a just-created-or-reused dive_sites row with nothing
+      // pointing at it (resolveDiveSiteId ran before this insert no-op'd). Harmless: the site
+      // still matches by name for any future import, so it gets reused rather than duplicated --
+      // same trade-off lib/dives.ts's own createDive already accepts for a rolled-back write.
+      return { inserted: false };
+    }
+
+    return { inserted: true, id: inserted.rows[0].id };
   });
 }
 

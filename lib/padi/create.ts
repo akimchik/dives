@@ -8,7 +8,11 @@ import { createLogbookDive as defaultCreateLogbookDive, decodeIdTokenClaims, Pad
 
 export type CreatePadiDiveResult =
   | { ok: true; padiDiveId: number }
-  | { ok: false; error: string; reason: "not_connected" | "already_linked" | "reconnect_required" | "infrastructure" };
+  | {
+      ok: false;
+      error: string;
+      reason: "not_connected" | "already_linked" | "reconnect_required" | "validation" | "infrastructure";
+    };
 
 type PadiCreateClient = {
   createLogbookDive: typeof defaultCreateLogbookDive;
@@ -97,6 +101,46 @@ function toPadiNumberString(value: string | number | null, fractionDigits?: numb
   return fractionDigits === undefined ? String(parsed) : parsed.toFixed(fractionDigits);
 }
 
+function parseCylinderLiters(tankInfo: string | null): number | null {
+  const normalized = tankInfo?.replace(/,/g, ".");
+  if (!normalized) return null;
+
+  const twinset = normalized.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*l/i);
+  if (twinset) {
+    const count = Number(twinset[1]);
+    const liters = Number(twinset[2]);
+    return Number.isFinite(count) && Number.isFinite(liters) ? count * liters : null;
+  }
+
+  const single = normalized.match(/(\d+(?:\.\d+)?)\s*l/i);
+  if (single) {
+    const liters = Number(single[1]);
+    return Number.isFinite(liters) ? liters : null;
+  }
+
+  return null;
+}
+
+function mapCylinderSize(dive: Pick<DiveRecord, "cylinder_size" | "tank_info">): string | null {
+  return toPadiNumberString(dive.cylinder_size) ?? toPadiNumberString(parseCylinderLiters(dive.tank_info));
+}
+
+function mapCylinderType(dive: Pick<DiveRecord, "cylinder_size" | "tank_info">): string | null {
+  const info = dive.tank_info?.toLowerCase() ?? "";
+  if (/\b(?:aluminium|aluminum|alu)\b/.test(info)) return "Aluminum";
+  if (/\bsteel\b/.test(info)) return "Steel";
+
+  const size = toNumber(dive.cylinder_size) ?? parseCylinderLiters(dive.tank_info);
+  if (size === null) return null;
+
+  // PADI's `cylinder_type` is an enum, not the app's free-form cylinder description. For common
+  // metric cylinders this app records only size, and the observed PADI enum values are material
+  // names (`Steel`/`Aluminum`). Prefer the common European steel default for metric sizes; keep the
+  // AL80-ish 11.1L/11L case as Aluminum. Users can still make the mapping explicit by typing
+  // "aluminum"/"steel" in the free-form cylinder field.
+  return size >= 10.8 && size <= 11.5 ? "Aluminum" : "Steel";
+}
+
 function formatPadiDate(date: Date): string {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
@@ -181,8 +225,8 @@ export function mapDiveToPadiCreateInput(dive: DiveRecord, affiliateId: string |
         weight: toPadiNumberString(dive.weight),
         weight_type: dive.weight_feedback ? (PADI_WEIGHT_BY_APP_WEIGHT[dive.weight_feedback] ?? dive.weight_feedback) : null,
         additional_equipment: mapAdditionalEquipment(dive),
-        cylinder_type: trimString(dive.tank_info),
-        cylinder_size: toPadiNumberString(dive.cylinder_size),
+        cylinder_type: mapCylinderType(dive),
+        cylinder_size: mapCylinderSize(dive),
         gas_mixture: gas.mixture,
         oxygen: gas.oxygen,
         nitrogen: gas.nitrogen,
@@ -198,6 +242,21 @@ export function mapDiveToPadiCreateInput(dive: DiveRecord, affiliateId: string |
       },
     },
   };
+}
+
+export function padiCreateValidationError(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+  const errors = (response as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return null;
+
+  const messages = errors
+    .map((error) => (error && typeof error === "object" ? (error as { message?: unknown }).message : null))
+    .filter((message): message is string => typeof message === "string" && message.trim().length > 0);
+
+  const invalidInput = messages.find((message) => /invalid input value for enum/i.test(message));
+  if (invalidInput) return `PADI rejected one of this dive's field values: ${invalidInput}. Edit the dive and try again.`;
+
+  return null;
 }
 
 async function getIntegration(userId: string): Promise<PadiIntegrationTokenRow | null> {
@@ -285,8 +344,13 @@ export async function createDiveInPadi(
   const created = response?.data?.insert_logbook_logs?.returning?.[0];
   const padiDiveId = Number(created?.id);
   if (!Number.isInteger(padiDiveId)) {
+    const validationError = padiCreateValidationError(response);
     console.error("PADI create returned no dive id", response);
-    return { ok: false, error: "PADI did not return a created dive id", reason: "infrastructure" };
+    return {
+      ok: false,
+      error: validationError ?? "PADI did not return a created dive id",
+      reason: validationError ? "validation" : "infrastructure",
+    };
   }
 
   try {

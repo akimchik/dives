@@ -102,3 +102,15 @@ User said to create a new Gitea issue for the new feature: creating dives in PAD
 ## 2026-09-05 16:19 Commit PADI create feature
 
 User requested committing the implemented create-only PADI dive feature.
+
+## 2026-09-05 16:43 PADI cylinder validation error
+
+User reported PADI create failing because custom cylinder text was sent as the PADI cylinder enum, and requested mapping it based on size plus propagating reasonable user-fixable errors to the UI.
+
+## 2026-09-05 16:43 Aborted PADI cylinder prompt
+
+User started an earlier prompt, “Custom cylinder does not fit PADI:”, then intentionally interrupted it before completing the message.
+
+## 2026-09-05 16:55 Commit and push PADI cylinder fix
+
+User requested committing and pushing the PADI custom-cylinder mapping and UI error propagation fix.

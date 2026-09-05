@@ -89,9 +89,12 @@ Key enum translations are intentionally conservative and visible in tests:
 | `rating = 1/2-3/4/5` | `feeling = Poor/Average/Good/Amazing` |
 | `gas_mix = Air` | `gas_mixture = Air`, `oxygen = 21`, `nitrogen = 79`, `helium = 0` |
 | `gas_mix = EAN32` | `gas_mixture = Nitrox`, `oxygen = 32`, `nitrogen = 68`, `helium = 0` |
+| Free-form `tank_info` like `2x7L, Steel 232bar` | `cylinder_type = Steel`, `cylinder_size = 14`; PADI gets only its material enum plus numeric size, never the raw custom text |
 
 Updating an existing PADI dive is intentionally not implemented. Once `padi_dive_id` is present the
-detail page hides the create button rather than offering an update path.
+detail page hides the create button rather than offering an update path. If PADI returns a
+user-fixable enum validation error, the server action returns that message to the button toast so
+the user can edit the local dive and retry instead of seeing a generic failure.
 
 ## Import field map
 

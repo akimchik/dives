@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DiveRecord } from "@/lib/dives";
-import { mapDiveToPadiCreateInput } from "@/lib/padi/create";
+import { mapDiveToPadiCreateInput, padiCreateValidationError } from "@/lib/padi/create";
 
 const baseDive: DiveRecord = {
   id: 42,
@@ -140,4 +140,50 @@ describe("mapDiveToPadiCreateInput", () => {
       experiences: { data: { feeling: null } },
     });
   });
+  it("maps custom cylinder descriptions to PADI cylinder enums and derived size", () => {
+    const result = mapDiveToPadiCreateInput(
+      {
+        ...baseDive,
+        tank_info: "2x7L, Steel 232bar",
+        cylinder_size: null,
+      },
+      "29837190",
+      new Date("2026-09-05T13:17:42.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      equipment: { data: { cylinder_type: "Steel", cylinder_size: "14" } },
+    });
+  });
+
+  it("uses the size fallback for material-only PADI cylinder enums", () => {
+    expect(
+      mapDiveToPadiCreateInput(
+        { ...baseDive, tank_info: "Custom twinset", cylinder_size: "14" },
+        "29837190",
+        new Date("2026-09-05T13:17:42.000Z"),
+      ),
+    ).toMatchObject({ equipment: { data: { cylinder_type: "Steel", cylinder_size: "14" } } });
+
+    expect(
+      mapDiveToPadiCreateInput(
+        { ...baseDive, tank_info: "AL80", cylinder_size: "11.1" },
+        "29837190",
+        new Date("2026-09-05T13:17:42.000Z"),
+      ),
+    ).toMatchObject({ equipment: { data: { cylinder_type: "Aluminum", cylinder_size: "11.1" } } });
+  });
+
+  it("turns user-fixable PADI enum errors into UI-safe action text", () => {
+    expect(
+      padiCreateValidationError({
+        errors: [{ message: 'invalid input value for enum cylinder: "2x7L, Steel 232bar"' }],
+      }),
+    ).toBe(
+      `PADI rejected one of this dive's field values: invalid input value for enum cylinder: "2x7L, Steel 232bar". Edit the dive and try again.`,
+    );
+
+    expect(padiCreateValidationError({ errors: [{ message: "internal execution error" }] })).toBeNull();
+  });
+
 });

@@ -28,9 +28,12 @@ const {
   getDiveActivityByDay,
   getDiveStats,
   listDiveSites,
+  listDiveSitesWithDiveCounts,
   listDives,
   listRecentCylinders,
+  mergeDiveSites,
   updateDive,
+  updateDiveSite,
   DiveNotFoundError,
   DiveSiteNotFoundError,
 } = await import("@/lib/dives");
@@ -411,6 +414,87 @@ describe("dive sites are per-user", () => {
     expect(await listDiveSites(alice.id)).toEqual([expect.objectContaining({ id: aliceSite.id })]);
     expect(await listDiveSites(bob.id, name)).toEqual([expect.objectContaining({ id: bobSite.id })]);
   });
+
+  it("updates a user's own dive site details and preserves attached dives", async () => {
+    const owner = await createOwner();
+    const site = await findOrCreateDiveSite(owner.id, { name: `Old Site ${randomUUID().slice(0, 8)}` });
+    const dive = await createDive(owner, diveInput({ site: { id: site.id } }));
+
+    const updated = await updateDiveSite(owner.id, site.id, {
+      name: "Renamed Reef",
+      location: "Bonaire",
+      lat: 12.15,
+      lng: -68.28,
+    });
+
+    expect(updated).toMatchObject({
+      id: site.id,
+      name: "Renamed Reef",
+      location: "Bonaire",
+      lat: 12.15,
+      lng: -68.28,
+      dive_count: 1,
+    });
+    expect((await getDive(owner.id, dive.id))?.site_name).toBe("Renamed Reef");
+  });
+
+  it("merges two owned dive sites, keeps chosen properties, and rewires dive logs", async () => {
+    const owner = await createOwner();
+    const keep = await findOrCreateDiveSite(owner.id, {
+      name: `Blue Hole ${randomUUID().slice(0, 8)}`,
+      location: "Dahab",
+      lat: 28.57,
+      lng: 34.54,
+    });
+    const duplicate = await findOrCreateDiveSite(owner.id, {
+      name: `Blue Hole typo ${randomUUID().slice(0, 8)}`,
+      location: "South Sinai",
+      lat: 28.58,
+      lng: 34.55,
+    });
+
+    const firstDive = await createDive(owner, diveInput({ site: { id: keep.id }, title: "kept" }));
+    const secondDive = await createDive(owner, diveInput({ site: { id: duplicate.id }, title: "moved" }));
+
+    const result = await mergeDiveSites(owner.id, {
+      fromSiteId: duplicate.id,
+      intoSiteId: keep.id,
+      name: keep.name,
+      location: duplicate.location,
+      lat: keep.lat,
+      lng: duplicate.lng,
+    });
+
+    expect(result.movedDives).toBe(1);
+    expect(result.site).toMatchObject({
+      id: keep.id,
+      name: keep.name,
+      location: duplicate.location,
+      lat: keep.lat,
+      lng: duplicate.lng,
+      dive_count: 2,
+    });
+    expect(await listDiveSites(owner.id, duplicate.name)).toEqual([]);
+    expect((await getDive(owner.id, firstDive.id))?.dive_site_id).toBe(keep.id);
+    expect((await getDive(owner.id, secondDive.id))?.dive_site_id).toBe(keep.id);
+  });
+
+  it("lists dive sites with attached-dive counts", async () => {
+    const owner = await createOwner();
+    const used = await findOrCreateDiveSite(owner.id, { name: `Counted Site ${randomUUID().slice(0, 8)}` });
+    const unused = await findOrCreateDiveSite(owner.id, { name: `Unused Site ${randomUUID().slice(0, 8)}` });
+    await createDive(owner, diveInput({ site: { id: used.id } }));
+    await createDive(owner, diveInput({ site: { id: used.id }, title: "second" }));
+
+    const counts = await listDiveSitesWithDiveCounts(owner.id);
+
+    expect(counts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: used.id, dive_count: 2 }),
+        expect.objectContaining({ id: unused.id, dive_count: 0 }),
+      ]),
+    );
+  });
 });
 
 describe("cross-user access (IDOR)", () => {
@@ -458,6 +542,27 @@ describe("cross-user access (IDOR)", () => {
     );
 
     expect(await listDives(alice.id)).toEqual([]);
+  });
+
+  it("refuses to edit or merge another user's dive sites", async () => {
+    const alice = await createOwner();
+    const bob = await createOwner();
+    const aliceSite = await findOrCreateDiveSite(alice.id, { name: `Alice Bay ${randomUUID().slice(0, 8)}` });
+    const bobSite = await findOrCreateDiveSite(bob.id, { name: `Bob Bay ${randomUUID().slice(0, 8)}` });
+
+    await expect(updateDiveSite(alice.id, bobSite.id, { name: "Hijacked" })).rejects.toThrow(DiveSiteNotFoundError);
+    await expect(
+      mergeDiveSites(alice.id, {
+        fromSiteId: bobSite.id,
+        intoSiteId: aliceSite.id,
+        name: aliceSite.name,
+        location: null,
+        lat: null,
+        lng: null,
+      }),
+    ).rejects.toThrow(DiveSiteNotFoundError);
+
+    expect((await listDiveSites(bob.id, bobSite.name))[0].name).toBe(bobSite.name);
   });
 });
 

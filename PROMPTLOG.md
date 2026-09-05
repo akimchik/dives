@@ -70,3 +70,15 @@ User reported token rotation failing with TypeError reading accessToken in scrip
 ## 2026-09-05 13:10 Gitea issue number provided
 
 User answered that the existing Gitea issue is #1 for the PADI token rotation/reconnect bug.
+
+## 2026-09-05 13:31 Dive sites editing and merging
+
+User requested a dive sites editing feature: add a menu link to a Dive Sites page, list all dive sites, allow editing each, and support interactive merging of two dive sites with property selection and replacement in dive logs.
+
+## 2026-09-05 13:33 Gitea issue number for dive sites
+
+User answered that existing Gitea issue #1 should be used for the dive-sites editing and merging feature.
+
+## 2026-09-05 14:32 Commit dive-sites feature
+
+User requested committing the implemented dive-sites editing and merge feature.

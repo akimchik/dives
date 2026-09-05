@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Waves } from "lucide-react";
 
 import { LogoutButton } from "@/components/logout-button";
+import { ManageMenu } from "@/components/manage-menu";
 import { ModeToggle } from "@/components/mode-toggle";
 import { NavLink } from "@/components/nav-link";
 
@@ -37,6 +38,7 @@ export function AppShell({
           <nav aria-label="Main" className="flex items-center gap-1">
             <NavLink href="/dashboard">Dashboard</NavLink>
             <NavLink href="/dives">Logbook</NavLink>
+            <ManageMenu />
           </nav>
 
           <div className="ml-auto flex items-center gap-1">

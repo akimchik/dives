@@ -82,22 +82,28 @@ migration is ever needed for a new table.**
 
 ## Dive logbook data access
 
-`lib/dives.ts` holds every dive/dive-site query, and `app/actions/dives.ts` the
-`"use server"` wrappers the UI calls (`createDiveAction`, `updateDiveAction`,
-`deleteDiveAction`, plus `searchDiveSitesAction`/`createDiveSiteAction` for the
-site autocomplete). Every function there takes the session user's id — resolved
-by `requireUser()` in the action, never from a URL or form field — and filters on
-it. A dive or site id belonging to someone else matches no row: reads return
-`null`/an empty list, mutations throw `DiveNotFoundError`/`DiveSiteNotFoundError`,
-so cross-user access is always not-found and never a partial write.
+`lib/dives.ts` holds every dive/dive-site query. `app/actions/dives.ts` exposes the
+`"use server"` wrappers the dive form calls (`createDiveAction`,
+`updateDiveAction`, `deleteDiveAction`, plus `searchDiveSitesAction`/
+`createDiveSiteAction` for the site autocomplete), while
+`app/actions/dive-sites.ts` exposes the management-page wrappers
+(`updateDiveSiteAction`, `mergeDiveSitesAction`). Every function there takes the
+session user's id — resolved by `requireUser()` in the action, never from a URL
+or form field — and filters on it. A dive or site id belonging to somebody else
+matches no row: reads return `null`/an empty list, mutations throw
+`DiveNotFoundError`/`DiveSiteNotFoundError`, so cross-user access is always
+not-found and never a partial write.
 
-Each mutation runs as one transaction (`getPool().connect()` → `begin` → write →
-`commit`, released in a `finally`) that also resolves the dive site
+Each dive mutation runs as one transaction (`getPool().connect()` → `begin` →
+write → `commit`, released in a `finally`) that also resolves the dive site
 (create-or-reuse by name, so a rolled-back dive leaves no orphan site) and
 enqueues the `dive_backup` notification through
 `enqueueNotification(..., { client })`. The dive row and its backup email can
 therefore never exist without each other. Deletes snapshot the dive *before*
 removing it, since the worker draining the queue later has no row left to read.
+Dive-site merge is also transactional: it locks both owned site rows, applies the
+chosen result properties to the survivor, rewrites `dives.dive_site_id` for the
+source site to the survivor, then deletes the source site.
 
 The enqueued payload is the flat
 `{ event, dive: { ...columns, site_name, site_location, site_lat, site_lng } }`
@@ -113,19 +119,21 @@ same dive produce two outbox rows instead of collapsing into one.
 | --- | --- |
 | `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
 | `/dives` | The whole logbook, newest first |
+| `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
 | `/dives/[id]` | One dive in full, with its depth-profile chart |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
 
-All five call `requireUser("<their own path>")` before any query, so a logged-out
+All authenticated logbook screens call `requireUser("<their own path>")` before any query, so a logged-out
 request is redirected (307) to `/?next=…` and never reaches `lib/dives.ts`.
 `/dives/[id]` and `/dives/[id]/edit` render `notFound()` both for ids that do not
 exist and for ids owned by someone else — the two are deliberately
 indistinguishable.
 
 Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
-every authenticated screen), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
-over the user's own sites, with inline create), `depth-profile-field.tsx`,
-`depth-profile-chart.tsx` and `delete-dive-button.tsx`. Every button that makes a
+every authenticated screen), `manage-menu.tsx` (the header menu linking to Dive
+Sites and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
+over the user's own sites, with inline create), `dive-sites-manager.tsx`,
+`depth-profile-field.tsx`, `depth-profile-chart.tsx` and `delete-dive-button.tsx`. Every button that makes a
 server call follows `AGENTS.md`'s convention: disabled with a spinner for the
 duration, then a sonner toast on the result.
 

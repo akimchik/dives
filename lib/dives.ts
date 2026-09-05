@@ -35,6 +35,25 @@ export type DiveSiteRow = {
   created_at: Date;
 };
 
+export type DiveSiteWithDiveCount = DiveSiteRow & { dive_count: number };
+
+export type DiveSiteInput = {
+  name: string;
+  location?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+};
+
+export type DiveSiteMergeInput = DiveSiteInput & {
+  fromSiteId: number;
+  intoSiteId: number;
+};
+
+export type DiveSiteMergeResult = {
+  site: DiveSiteWithDiveCount;
+  movedDives: number;
+};
+
 // The dive_backup payload contract (scripts/notifications/templates.mjs's renderDiveBackupEmail and
 // queue.mjs's buildDiveBackupAttachments): a FLAT column snapshot. The site is flattened into
 // site_name/site_location/site_lat/site_lng rather than nested, because the CSV attachment writes
@@ -268,13 +287,140 @@ export async function listDiveSites(userId: string, query?: string): Promise<Div
   return result.rows;
 }
 
+
+export async function listDiveSitesWithDiveCounts(userId: string): Promise<DiveSiteWithDiveCount[]> {
+  const result = await queryRead<DiveSiteWithDiveCount>(
+    `
+      select ds.id, ds.name, ds.location, ds.lat, ds.lng, ds.created_at, count(d.id)::int as dive_count
+      from dive_sites ds
+      left join dives d on d.dive_site_id = ds.id and d.user_id = ds.user_id
+      where ds.user_id = $1
+      group by ds.id, ds.name, ds.location, ds.lat, ds.lng, ds.created_at
+      order by ds.name asc
+    `,
+    [userId],
+  );
+
+  return result.rows;
+}
+
+function normalizeDiveSiteInput(input: DiveSiteInput): Required<DiveSiteInput> {
+  const name = input.name.trim();
+
+  if (!name) {
+    throw new Error("Dive site name is required.");
+  }
+
+  return {
+    name,
+    location: input.location?.trim() || null,
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
+  };
+}
+
+async function loadDiveSiteWithDiveCount(
+  executor: Pick<PoolClient, "query">,
+  userId: string,
+  siteId: number,
+): Promise<DiveSiteWithDiveCount> {
+  const result = await executor.query<DiveSiteWithDiveCount>(
+    `
+      select ds.id, ds.name, ds.location, ds.lat, ds.lng, ds.created_at, count(d.id)::int as dive_count
+      from dive_sites ds
+      left join dives d on d.dive_site_id = ds.id and d.user_id = ds.user_id
+      where ds.id = $1 and ds.user_id = $2
+      group by ds.id, ds.name, ds.location, ds.lat, ds.lng, ds.created_at
+    `,
+    [siteId, userId],
+  );
+
+  if (!result.rows[0]) throw new DiveSiteNotFoundError();
+  return result.rows[0];
+}
+
+export async function updateDiveSite(
+  userId: string,
+  siteId: number,
+  input: DiveSiteInput,
+): Promise<DiveSiteWithDiveCount> {
+  const normalized = normalizeDiveSiteInput(input);
+
+  const updated = await getPool().query<DiveSiteRow>(
+    `
+      update dive_sites
+      set name = $3, location = $4, lat = $5, lng = $6
+      where id = $1 and user_id = $2
+      returning id
+    `,
+    [siteId, userId, normalized.name, normalized.location, normalized.lat, normalized.lng],
+  );
+
+  if (updated.rowCount === 0) throw new DiveSiteNotFoundError();
+  return loadDiveSiteWithDiveCount(getPool(), userId, siteId);
+}
+
+export async function mergeDiveSites(userId: string, input: DiveSiteMergeInput): Promise<DiveSiteMergeResult> {
+  if (input.fromSiteId === input.intoSiteId) {
+    throw new Error("Choose two different dive sites to merge.");
+  }
+
+  const normalized = normalizeDiveSiteInput(input);
+
+  return inTransaction(async (client) => {
+    const sites = await client.query<{ id: number }>(
+      `
+        select id
+        from dive_sites
+        where user_id = $1 and id = any($2::int[])
+        for update
+      `,
+      [userId, [input.fromSiteId, input.intoSiteId]],
+    );
+
+    if (sites.rows.length !== 2) throw new DiveSiteNotFoundError();
+
+    const updatedTarget = await client.query(
+      `
+        update dive_sites
+        set name = $3, location = $4, lat = $5, lng = $6
+        where id = $1 and user_id = $2
+      `,
+      [input.intoSiteId, userId, normalized.name, normalized.location, normalized.lat, normalized.lng],
+    );
+
+    if (updatedTarget.rowCount === 0) throw new DiveSiteNotFoundError();
+
+    const moved = await client.query(
+      `
+        update dives
+        set dive_site_id = $3, updated_at = now()
+        where user_id = $1 and dive_site_id = $2
+      `,
+      [userId, input.fromSiteId, input.intoSiteId],
+    );
+
+    const deleted = await client.query("delete from dive_sites where id = $1 and user_id = $2", [
+      input.fromSiteId,
+      userId,
+    ]);
+
+    if (deleted.rowCount === 0) throw new DiveSiteNotFoundError();
+
+    return {
+      site: await loadDiveSiteWithDiveCount(client, userId, input.intoSiteId),
+      movedDives: moved.rowCount ?? 0,
+    };
+  });
+}
+
 // Create-or-reuse for the form's site autocomplete: an existing site of this user with the same
 // (case-insensitive) name is reused rather than duplicated. Takes an optional client so the site
 // can be created inside the dive's own transaction -- a rolled-back dive write must not leave an
 // orphaned site behind.
 export async function findOrCreateDiveSite(
   userId: string,
-  input: { name: string; location?: string | null; lat?: number | null; lng?: number | null },
+  input: DiveSiteInput,
   client?: PoolClient,
 ): Promise<DiveSiteRow> {
   const name = input.name.trim();

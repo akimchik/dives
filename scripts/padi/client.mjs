@@ -152,11 +152,16 @@ export async function refresh(refreshToken, idToken) {
  * `affiliate-id` HTTP header and the `affiliate_id` GraphQL variable -- PADI's
  * captured requests set both to the same value on every logbook call, alongside
  * `x-platform: web`.
+ *
+ * `bearerToken` must be the **idToken**, not the OAuth accessToken returned alongside it --
+ * the logbook API validates the JWT's own `custom:affiliate_id` claim against the `affiliate-id`
+ * header/variable, and only the idToken carries that claim. Sending the accessToken here gets a
+ * 403 "affiliateid and idtoken don't match" (see scripts/padi/debug-logbook.mjs).
  */
-export async function fetchLogbookPage(accessToken, affiliateId, { limit, offset } = {}) {
+export async function fetchLogbookPage(bearerToken, affiliateId, { limit, offset } = {}) {
   return padiRequest(`${PADI_LOGBOOK_BASE_URL}/api/Logbook`, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${bearerToken}`,
       "x-platform": "web",
       "affiliate-id": String(affiliateId),
     },
@@ -168,12 +173,13 @@ export async function fetchLogbookPage(accessToken, affiliateId, { limit, offset
 }
 
 /**
- * Fetches the full detail record for a single logbook dive id.
+ * Fetches the full detail record for a single logbook dive id. `bearerToken` must be the idToken
+ * -- see `fetchLogbookPage`'s doc comment above.
  */
-export async function fetchLogbookDetail(accessToken, affiliateId, id) {
+export async function fetchLogbookDetail(bearerToken, affiliateId, id) {
   return padiRequest(`${PADI_LOGBOOK_BASE_URL}/api/Logbook`, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${bearerToken}`,
       "x-platform": "web",
       "affiliate-id": String(affiliateId),
     },

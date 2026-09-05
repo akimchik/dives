@@ -1,5 +1,7 @@
 export declare const PADI_CLIENT_ID: string;
 
+export declare const LOGBOOK_PAGE_QUERY: string;
+
 export declare class PadiApiError extends Error {
   status: number | undefined;
   constructor(message: string, status?: number);
@@ -28,13 +30,13 @@ export function login(username: string, password: string): Promise<PadiLoginResp
 export function refresh(refreshToken: string, idToken: string): Promise<PadiLoginResponse>;
 
 export function fetchLogbookPage(
-  accessToken: string,
+  bearerToken: string,
   affiliateId: string | number,
   options: { limit?: number; offset?: number },
 ): Promise<PadiLogbookLogsPage>;
 
 export function fetchLogbookDetail(
-  accessToken: string,
+  bearerToken: string,
   affiliateId: string | number,
   id: string | number,
 ): Promise<PadiLogbookLogsPage>;

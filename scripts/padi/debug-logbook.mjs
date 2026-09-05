@@ -88,11 +88,17 @@ async function main() {
   console.log("affiliateId (custom:affiliate_id claim):", affiliateId);
 
   if (!onlyBrowser) {
-    await runVariant("minimal headers (current app behavior)", tokens.accessToken, affiliateId, MINIMAL_HEADERS);
+    await runVariant(
+      "minimal headers, accessToken as bearer (current app behavior)",
+      tokens.accessToken,
+      affiliateId,
+      MINIMAL_HEADERS,
+    );
   }
   if (!onlyMinimal) {
-    await runVariant("full browser headers", tokens.accessToken, affiliateId, BROWSER_HEADERS);
+    await runVariant("full browser headers, accessToken as bearer", tokens.accessToken, affiliateId, BROWSER_HEADERS);
   }
+  await runVariant("minimal headers, idToken as bearer", tokens.idToken, affiliateId, MINIMAL_HEADERS);
 }
 
 main().catch((error) => {

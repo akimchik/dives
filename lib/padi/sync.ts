@@ -116,7 +116,7 @@ export async function syncPadiLogbook(
     return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
   }
 
-  let accessToken: string;
+  let bearerToken: string;
   let affiliateId: string;
   try {
     assertKeyConfigured(process.env.PADI_TOKEN_ENCRYPTION_KEY);
@@ -125,9 +125,13 @@ export async function syncPadiLogbook(
       ? keyFromEnvValue(process.env.PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS)
       : undefined;
 
-    accessToken = decryptSecret(integration.access_token_encrypted, key, `${owner.id}:access`, previousKey);
-    const idToken = decryptSecret(integration.id_token_encrypted, key, `${owner.id}:id`, previousKey);
-    const claims = decodeIdTokenClaims(idToken);
+    // The logbook API validates the JWT sent as `Authorization: Bearer` against its own
+    // `custom:affiliate_id` claim, so despite the OAuth-shaped token set it's the idToken that
+    // belongs here, not the accessToken -- a real browser session does the same (confirmed via
+    // scripts/padi/debug-logbook.mjs: the accessToken gets a 403 "affiliateid and idtoken don't
+    // match", the idToken gets a 200).
+    bearerToken = decryptSecret(integration.id_token_encrypted, key, `${owner.id}:id`, previousKey);
+    const claims = decodeIdTokenClaims(bearerToken);
     if (!claims.affiliateId) throw new Error("PADI idToken is missing custom:affiliate_id");
     affiliateId = String(claims.affiliateId);
   } catch (error) {
@@ -158,7 +162,7 @@ export async function syncPadiLogbook(
       return { ok: false, error: "Sync already in progress", reason: "in_progress" };
     }
 
-    const result = await runSync({ owner, accessToken, affiliateId, padiClient });
+    const result = await runSync({ owner, bearerToken, affiliateId, padiClient });
     if (result.ok) {
       await getPool().query("update padi_integrations set synced_at = now() where user_id = $1", [owner.id]);
     }
@@ -181,12 +185,12 @@ export async function syncPadiLogbook(
 
 async function runSync({
   owner,
-  accessToken,
+  bearerToken,
   affiliateId,
   padiClient,
 }: {
   owner: DiveOwner;
-  accessToken: string;
+  bearerToken: string;
   affiliateId: string;
   padiClient: PadiLogbookClient;
 }): Promise<SyncPadiResult> {
@@ -198,7 +202,7 @@ async function runSync({
   while (Date.now() < deadline) {
     let page;
     try {
-      page = await padiClient.fetchLogbookPage(accessToken, affiliateId, { limit: PAGE_SIZE, offset });
+      page = await padiClient.fetchLogbookPage(bearerToken, affiliateId, { limit: PAGE_SIZE, offset });
     } catch (error) {
       if (isReconnectRequired(error)) {
         return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
@@ -219,7 +223,7 @@ async function runSync({
 
     const details = await mapWithConcurrency(toFetch, DETAIL_FETCH_CONCURRENCY, async (id) => {
       try {
-        const detail = await padiClient.fetchLogbookDetail(accessToken, affiliateId, id);
+        const detail = await padiClient.fetchLogbookDetail(bearerToken, affiliateId, id);
         return { ok: true as const, record: detail?.data?.logbook_logs?.[0] };
       } catch (error) {
         if (isReconnectRequired(error)) {

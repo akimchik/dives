@@ -148,10 +148,14 @@ page narrows the JSONB it read back with the same module's `isDepthProfile`
 guard. The raw text is stored verbatim in `depth_profile_raw` alongside the
 derived `depth_profile` JSON, so a future parser change can re-derive it.
 
-`components/depth-profile-chart.tsx` is dependency-free inline SVG rather than a
-charting library, which keeps it a plain server component — the detail page ships
-no chart JavaScript. The y axis is *not* inverted: depth grows downward, so the
-trace reads like a dive computer's.
+`components/depth-profile-chart.tsx` and `components/suunto-profile-chart.tsx`
+are client components built on shadcn's `chart.tsx` (recharts) — shadcn's Area
+Chart - Gradient, with tooltips. The y axis is *not* inverted: depth grows
+downward, so the trace reads like a dive computer's. `SuuntoProfileChart`'s four
+streams (depth/temperature/tankPressure/gasConsumption) don't share a scale, so
+a `ToggleGroup` switches which single stream is shown rather than overlaying
+them; it takes just `points`, not the whole `SuuntoDiveProfile`, so the raw
+Suunto summary blob (see below) never crosses the server→client boundary.
 
 ### Theme
 

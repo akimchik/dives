@@ -37,6 +37,11 @@ function hasValues(points: SuuntoDiveProfilePoint[], key: SeriesKey): boolean {
   });
 }
 
+function formatWithUnit(value: number, unit: string): string {
+  const rounded = Math.round(value);
+  return unit === "bar" ? `${rounded} bar` : `${rounded}${unit}`;
+}
+
 // Takes just the points, not the whole SuuntoDiveProfile: this is a client component, and Next.js
 // serializes every field of a client-component prop into the page (it doesn't tree-shake unread
 // ones) -- the rest of the profile carries the raw Suunto summary blob, including a
@@ -58,11 +63,15 @@ export function SuuntoProfileChart({
 
   const activeSeries = available.find((series) => series.key === active) ?? available[0];
   const gradientId = `suuntoFill-${activeSeries.key}`;
+  const maxTime = Math.round(Math.max(...points.map((point) => point.time)));
 
-  const data = points.map((point) => ({
-    time: point.time,
-    value: typeof point[activeSeries.key] === "number" ? point[activeSeries.key] : null,
-  }));
+  const data = points.map((point) => {
+    const raw = point[activeSeries.key];
+    return {
+      time: point.time,
+      value: typeof raw === "number" && Number.isFinite(raw) ? raw : null,
+    };
+  });
 
   return (
     <figure className={cn("flex flex-col gap-3", className)}>
@@ -89,8 +98,10 @@ export function SuuntoProfileChart({
         config={chartConfig}
         className="aspect-[2.5/1] w-full"
         data-testid="suunto-profile-chart"
+        role="img"
+        aria-label={`Suunto dive profile: ${points.length} samples over ${maxTime} minutes, showing ${activeSeries.label.toLowerCase()}.`}
       >
-        <AreaChart data={data} margin={{ left: 12, right: 12, top: 12 }}>
+        <AreaChart accessibilityLayer data={data} margin={{ left: 12, right: 12, top: 12 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={`var(--color-${activeSeries.key})`} stopOpacity={0.5} />
@@ -112,8 +123,9 @@ export function SuuntoProfileChart({
             tickLine={false}
             axisLine={false}
             tickMargin={8}
-            width={44}
+            width={56}
             domain={activeSeries.key === "depth" ? [0, "dataMax"] : ["auto", "auto"]}
+            tickFormatter={(value: number) => formatWithUnit(value, activeSeries.unit)}
           />
           <ChartTooltip
             cursor={false}
@@ -137,6 +149,9 @@ export function SuuntoProfileChart({
           />
         </AreaChart>
       </ChartContainer>
+      <figcaption className="text-xs text-muted-foreground">
+        {points.length} samples · showing {activeSeries.label.toLowerCase()} ({activeSeries.unit})
+      </figcaption>
     </figure>
   );
 }

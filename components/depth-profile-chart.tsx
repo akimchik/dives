@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import {
@@ -25,10 +26,13 @@ export function DepthProfileChart({
   points: DepthPoint[];
   className?: string;
 }) {
+  const gradientId = `depthFill-${useId().replace(/:/g, "")}`;
+
   if (points.length < 2) return null;
 
   const maxTime = Math.round(Math.max(...points.map((point) => point.time)));
   const maxDepth = Math.max(...points.map((point) => point.depth));
+  const summary = `Depth profile: ${points.length} points over ${maxTime} minutes, reaching ${maxDepth} metres.`;
 
   return (
     <figure className={cn("flex flex-col gap-2", className)}>
@@ -36,10 +40,12 @@ export function DepthProfileChart({
         config={chartConfig}
         className="aspect-[2.5/1] w-full"
         data-testid="depth-profile-chart"
+        role="img"
+        aria-label={summary}
       >
-        <AreaChart data={points} margin={{ left: 12, right: 12, top: 12 }}>
+        <AreaChart accessibilityLayer data={points} margin={{ left: 12, right: 12, top: 12 }}>
           <defs>
-            <linearGradient id="depthFill" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="var(--color-depth)" stopOpacity={0.5} />
               <stop offset="95%" stopColor="var(--color-depth)" stopOpacity={0.05} />
             </linearGradient>
@@ -81,7 +87,7 @@ export function DepthProfileChart({
           <Area
             dataKey="depth"
             type="monotone"
-            fill="url(#depthFill)"
+            fill={`url(#${gradientId})`}
             stroke="var(--color-depth)"
             strokeWidth={2}
           />

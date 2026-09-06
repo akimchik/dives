@@ -2,13 +2,21 @@
 
 import { useId, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Upload, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 
-import { DepthProfileChart } from "@/components/depth-profile-chart";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { DepthProfileParseResult } from "@/lib/depth-profile";
+
+// The chart is recharts-backed (see components/depth-profile-chart.tsx) and only ever renders once
+// a profile has parsed successfully -- lazy-loading it keeps that chunk out of every /dives/new and
+// /dives/[id]/edit page load for the (common) case of a dive logged without a depth profile.
+const DepthProfileChart = dynamic(
+  () => import("@/components/depth-profile-chart").then((mod) => mod.DepthProfileChart),
+  { loading: () => <div className="aspect-[2.5/1] w-full animate-pulse rounded-md bg-muted" /> },
+);
 
 // Parsing happens in the parent (so it can block submit) and the result is handed down here purely
 // to be displayed. The raw text is always kept verbatim alongside the parsed JSON — `depth_profile`

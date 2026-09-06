@@ -424,6 +424,7 @@ function suuntoProfile(workoutKey: string): SuuntoDiveProfile {
         temperature: null,
         tankPressure: 184.6,
         gasConsumption: 0,
+        gasConsumptionRate: null,
       },
       {
         time: 1,
@@ -432,6 +433,7 @@ function suuntoProfile(workoutKey: string): SuuntoDiveProfile {
         temperature: 19.9,
         tankPressure: 170,
         gasConsumption: 14.6,
+        gasConsumptionRate: 14.6,
       },
     ],
     depthProfile: [

@@ -83,6 +83,7 @@ describe("compileSuuntoDiveProfile", () => {
     expect(result.profile.tankEndPressure).toBe(94.1);
     expect(result.profile.tankSizeLitres).toBe(14);
     expect(result.profile.gasMix).toBe("Air");
+    expect(result.profile.points.map((point) => point.gasConsumptionRate)).toEqual([null, 14.6, 75.9]);
     expect(result.profile.points.at(-1)).toMatchObject({ depth: 5.1, tankPressure: 94.1, gasConsumption: 90.5 });
     expect(result.profile.depthProfile).toEqual([
       { time: 0, depth: 1.42 },

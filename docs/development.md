@@ -152,11 +152,17 @@ derived `depth_profile` JSON, so a future parser change can re-derive it.
 are client components built on shadcn's `chart.tsx` (recharts) — shadcn's Area
 Chart - Gradient, with tooltips. The depth y-axis uses recharts' `reversed`, so
 depth still grows downward and the trace reads like a dive computer's.
-`SuuntoProfileChart`'s four
-streams (depth/temperature/tankPressure/gasConsumption) don't share a scale, so
-a `ToggleGroup` switches which single stream is shown rather than overlaying
-them; it takes just `points`, not the whole `SuuntoDiveProfile`, so the raw
-Suunto summary blob (see below) never crosses the server→client boundary.
+`SuuntoProfileChart`'s five
+streams (depth/temperature/tankPressure/gasConsumption/gasConsumptionRate)
+don't share a scale, so only the primary selected stream draws a (visible)
+y-axis; a multi-select `ToggleGroup` lets several streams be overlaid at once,
+with the tooltip reporting every selected stream's real value at the hovered
+time. `gasConsumptionRate` is `lib/suunto/profile.ts`'s `rate(gas_used[1m])`
+— the average bar/min drop in tank pressure over the trailing 1-minute window
+ending at each point, computed with a two-pointer walk since points are
+already time-ordered. The component takes just `points`, not the whole
+`SuuntoDiveProfile`, so the raw Suunto summary blob (see below) never crosses
+the server→client boundary.
 
 ### Theme
 

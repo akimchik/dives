@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { SuuntoDiveProfilePoint } from "@/lib/suunto/profile";
 import { cn } from "@/lib/utils";
 
-type SeriesKey = "depth" | "temperature" | "tankPressure" | "gasConsumption";
+type SeriesKey = "depth" | "temperature" | "tankPressure" | "gasConsumption" | "gasConsumptionRate";
 
 // Each stream has its own scale (metres vs °C vs bar), so multiple selected streams each get their
 // own (mostly hidden) y-axis rather than sharing one -- shadcn's Area Chart - Gradient
@@ -27,6 +27,7 @@ const SERIES: { key: SeriesKey; label: string; unit: string; color: string }[] =
   { key: "temperature", label: "Temp", unit: "°C", color: "#f97316" },
   { key: "tankPressure", label: "Pressure", unit: "bar", color: "#10b981" },
   { key: "gasConsumption", label: "Gas used", unit: "bar", color: "#8b5cf6" },
+  { key: "gasConsumptionRate", label: "Consumption rate", unit: "bar/min", color: "#ec4899" },
 ];
 
 const chartConfig = Object.fromEntries(
@@ -41,6 +42,7 @@ function hasValues(points: SuuntoDiveProfilePoint[], key: SeriesKey): boolean {
 }
 
 function formatWithUnit(value: number, unit: string): string {
+  if (unit === "bar/min") return `${value.toFixed(1)} ${unit}`;
   const rounded = Math.round(value);
   return unit === "bar" ? `${rounded} bar` : `${rounded}${unit}`;
 }

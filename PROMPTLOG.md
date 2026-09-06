@@ -249,3 +249,17 @@ single-select `ToggleGroup` to switch which one stream is shown, since the four 
 `ChartTooltipContent`'s `labelFormatter` isn't handed the raw numeric x-axis value for a
 non-categorical axis — it resolves to the series' config label instead — so both charts now pull
 the real time straight off the hovered point's payload.
+
+## 2026-09-06 22:03 CEST — Gas Consumption Rate Stream (Issue #15)
+
+> /autopilot implement https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/15
+
+Issue #15: "add a data stream that would calculate `rate(gas_used[1m])`". Added
+`gasConsumptionRate` to `lib/suunto/profile.ts`'s `SuuntoDiveProfilePoint`: a Prometheus-style
+`rate()` over the existing cumulative `gasConsumption` stream — the average bar/min drop in tank
+pressure over the trailing 1-minute window ending at each sample, computed with a two-pointer
+walk since points are already time-ordered. Wired it into `SuuntoProfileChart` as a fifth
+selectable stream (`bar/min`, pink), gave `formatWithUnit` a one-decimal path for that unit so
+small rates don't round away to 0, extended the existing `suunto-profile.test.ts` fixture
+assertions to cover the new field, and updated `docs/development.md`'s stream count/description
+(which had also drifted stale after the multi-select `ToggleGroup` change — fixed that too).

@@ -8,6 +8,7 @@ export type SuuntoDiveProfilePoint = {
   temperature: number | null;
   tankPressure: number | null;
   gasConsumption: number | null;
+  gasConsumptionRate: number | null;
 };
 
 export type SuuntoDiveProfile = {
@@ -89,6 +90,25 @@ function round(value: number | null, digits = 2): number | null {
   if (value === null) return null;
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+// Mirrors Prometheus's rate(gas_used[1m]): for each point, the average bar/min drop in tank
+// pressure since the earliest sample within the trailing 1-minute window. Points are already
+// ordered by time, so the window's start only ever moves forward -- one pass with a two-pointer
+// walk instead of a per-point scan.
+function computeGasConsumptionRate(points: SuuntoDiveProfilePoint[]): (number | null)[] {
+  const windowMinutes = 1;
+  let start = 0;
+  return points.map((point, index) => {
+    if (point.gasConsumption === null) return null;
+    while (start < index && points[start].time < point.time - windowMinutes) start++;
+
+    const windowStart = points[start];
+    const elapsedMinutes = point.time - windowStart.time;
+    if (windowStart.gasConsumption === null || elapsedMinutes <= 0) return null;
+
+    return round((point.gasConsumption - windowStart.gasConsumption) / elapsedMinutes, 2);
+  });
 }
 
 function sampleRecord(sampleWrapper: unknown): JsonRecord {
@@ -285,6 +305,7 @@ export function compileSuuntoDiveProfile(
     temperature: null,
     tankPressure: null,
     gasConsumption: null,
+    gasConsumptionRate: null,
   };
 
   for (const wrapper of dataSamples) {
@@ -308,9 +329,14 @@ export function compileSuuntoDiveProfile(
       temperature: temperature ?? previous.temperature,
       tankPressure: tankPressure ?? previous.tankPressure,
       gasConsumption: gasConsumption ?? previous.gasConsumption,
+      gasConsumptionRate: null,
     };
     rawPoints.push({ time: round(time, 3) ?? 0, timestamp, ...previous });
   }
+
+  computeGasConsumptionRate(rawPoints).forEach((rate, index) => {
+    rawPoints[index].gasConsumptionRate = rate;
+  });
 
   const depthProfile = rawPoints
     .filter((point): point is SuuntoDiveProfilePoint & { depth: number } => point.depth !== null)

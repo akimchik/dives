@@ -145,7 +145,7 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
         {{- if .Values.suuntoSidecar.enabled }}
         - name: suunto-sidecar
-          image: {{ .Values.suuntoSidecar.image.repository }}:{{ .Values.suuntoSidecar.image.tag }}
+          image: {{ default .Values.image.repository .Values.suuntoSidecar.image.repository }}:{{ default .Values.image.tag .Values.suuntoSidecar.image.tag }}
           imagePullPolicy: {{ .Values.suuntoSidecar.image.pullPolicy }}
           command: ["node"]
           args: ["scripts/suunto-sidecar/server.mjs"]
@@ -172,16 +172,20 @@ spec:
             - name: suunto
               containerPort: {{ .Values.suuntoSidecar.port }}
           livenessProbe:
-            httpGet:
-              path: /health
-              port: suunto
+            exec:
+              command:
+                - node
+                - -e
+                - "fetch('http://127.0.0.1:{{ .Values.suuntoSidecar.port }}/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"
             periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /health
-              port: suunto
+            exec:
+              command:
+                - node
+                - -e
+                - "fetch('http://127.0.0.1:{{ .Values.suuntoSidecar.port }}/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3

@@ -29,5 +29,9 @@ padiTokenRefresh:
 suuntoSidecar:
   enabled: false
   image:
+    # Defaults to the deployed app image when empty.
+    repository: ""
+    tag: ""
+  image:
     repository: registry.pumpking.aleksandr.vin/dives/web
     tag: amnesiac

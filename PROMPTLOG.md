@@ -190,3 +190,7 @@ User provided subagent notification: final code-review re-gate APPROVE with no b
 ## 2026-09-06 11:03 CEST — Commit Suunto Integration
 
 User asked to commit the completed Suunto staged import integration.
+
+## 2026-09-06 11:12 CEST — Suunto Connect Temporarily Unavailable
+
+User reported that after deployment, connecting to Suunto from Integrations page returns: 'Suunto import is temporarily unavailable. Please try again later.'

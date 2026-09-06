@@ -101,9 +101,10 @@ suuntoSidecar:
   enabled: false
   port: 4817
   image:
-    repository: registry.pumpking.aleksandr.vin/dives/web
+    # Defaults to image.repository/image.tag when left empty.
+    repository: ""
     pullPolicy: Always
-    tag: amnesiac
+    tag: ""
   suuntoolBin: "suuntool"
   timeoutMs: "60000"
   exportTimeoutMs: "180000"

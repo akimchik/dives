@@ -31,7 +31,7 @@ export function DepthProfileChart({
   if (points.length < 2) return null;
 
   const maxTime = Math.round(Math.max(...points.map((point) => point.time)));
-  const maxDepth = Math.max(...points.map((point) => point.depth));
+  const maxDepth = Math.round(Math.max(...points.map((point) => point.depth)) * 10) / 10;
   const summary = `Depth profile: ${points.length} points over ${maxTime} minutes, reaching ${maxDepth} metres.`;
 
   return (
@@ -40,7 +40,9 @@ export function DepthProfileChart({
         config={chartConfig}
         className="aspect-[2.5/1] w-full"
         data-testid="depth-profile-chart"
-        role="img"
+        // No role="img" here: that would mark the subtree presentational to assistive tech and
+        // defeat accessibilityLayer below, which makes individual data points keyboard-navigable.
+        // aria-label alone still gives screen readers a name for the chart as a whole.
         aria-label={summary}
       >
         <AreaChart accessibilityLayer data={points} margin={{ left: 12, right: 12, top: 12 }}>

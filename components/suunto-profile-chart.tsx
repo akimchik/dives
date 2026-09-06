@@ -98,7 +98,8 @@ export function SuuntoProfileChart({
         config={chartConfig}
         className="aspect-[2.5/1] w-full"
         data-testid="suunto-profile-chart"
-        role="img"
+        // No role="img": see the matching comment in depth-profile-chart.tsx -- it would defeat
+        // accessibilityLayer's keyboard-navigable data points below.
         aria-label={`Suunto dive profile: ${points.length} samples over ${maxTime} minutes, showing ${activeSeries.label.toLowerCase()}.`}
       >
         <AreaChart accessibilityLayer data={data} margin={{ left: 12, right: 12, top: 12 }}>

@@ -263,3 +263,33 @@ selectable stream (`bar/min`, pink), gave `formatWithUnit` a one-decimal path fo
 small rates don't round away to 0, extended the existing `suunto-profile.test.ts` fixture
 assertions to cover the new field, and updated `docs/development.md`'s stream count/description
 (which had also drifted stale after the multi-select `ToggleGroup` change — fixed that too).
+
+## 2026-09-07 01:44 CEST — Gas Consumption Rate Follow-up: Review Fixes + Backfill
+
+Autopilot Phase 4 (parallel architect/security/code-reviewer validation of the commit above)
+came back: security clean; code review non-blocking but flagged the fixture couldn't distinguish
+the two-pointer window walk from a naive adjacent-sample diff, a dead `gasConsumptionRate` slot
+sitting unused in `previous`'s carry-forward object, and quantization-amplified spikes in the
+partial window before a dive's first full minute; architect flagged that already-imported
+dives/pending imports (compiled before this field existed) would silently never show the new
+stream, since `compileSuuntoDiveProfile` only runs at import time and the result is persisted.
+Fixed all three code-review findings in `lib/suunto/profile.ts` (excluded `gasConsumptionRate`
+from the `previous` type entirely so it can't accidentally start carrying forward stale values;
+added a `start === 0 && elapsedMinutes < windowMinutes` guard so the noisy partial-window ramp-up
+returns `null` instead of a quantization-amplified rate; switched the mutate-in-place rate
+assignment to an immutable `.map`) and added a dense-sampling+gap unit test that a naive diff
+would fail but the real windowed logic passes. For the backfill: checked the local dev Postgres
+and found 49 dives / 36 pending imports with a pre-existing `suunto_profile`/`compiled_profile` —
+turned out to all be leftover fixture rows from `tests/integration/dives.test.ts`/
+`suunto-actions.test.ts` (their `bundle:${workoutKey}` placeholder, not real gzip), not the
+user's actual synced dive history, so nothing there actually needed backfilling. Wrote
+`scripts/backfill-suunto-gas-rate.ts` anyway (re-extracts `workout.sml.json` from the stored
+gzip'd `original_bundle` and re-runs today's `compileSuuntoDiveProfile`, idempotent, `--dry-run`
+support) for whenever the real deployed dev-dives Postgres needs it, and proved the success path
+end-to-end with a throwaway synthetic dive row (deleted after). Added `tsx` as a devDependency to
+run it and wired a `suunto:backfill-gas-rate` package.json script; that pulled in `esbuild` as a
+transitive dependency, which pnpm's newer build-script-approval gate silently started blocking
+for *every* pnpm command (`lint`, `test`, all of them) — fixed by approving `esbuild: true` in
+`pnpm-workspace.yaml`'s existing (pre-dating this repo) `allowBuilds` map, which is where pnpm 11
+actually reads that setting from (a `pnpm.onlyBuiltDependencies` key in `package.json`, the older
+convention, is silently ignored by this pnpm version).

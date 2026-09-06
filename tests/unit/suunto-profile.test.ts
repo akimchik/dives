@@ -231,4 +231,52 @@ describe("compileSuuntoDiveProfile", () => {
     const result = compileSuuntoDiveProfile("run", { Data: { Samples: [{ Sample: { Speed: 1 } }] } });
     expect(result).toEqual({ ok: false, error: "Suunto workout does not look like a dive SML export." });
   });
+
+  it("windows gasConsumptionRate over a real trailing minute instead of just adjacent samples", () => {
+    // Dense (20s) sampling at a constant 30 bar/min burn, plus a final sample after a 90s gap --
+    // wide enough that no prior sample falls inside its trailing 1-minute window. A naive
+    // adjacent-sample diff would report a rate at every point (including a wrong ~20 bar/min at
+    // the 90s-gap sample); the real two-pointer window should instead report null until a full
+    // minute of history exists, and null again once the gap exceeds the window.
+    const pressureSample = (secondsOffset: number, bar: number) => ({
+      TimeISO8601: new Date(Date.parse("2026-08-30T10:40:08.250+02:00") + secondsOffset * 1000).toISOString(),
+      Attributes: {
+        "suunto/sml": { Sample: { Depth: 10, Cylinders: [{ Pressure: bar * 100000 }] } },
+      },
+    });
+
+    const result = compileSuuntoDiveProfile("dense-window", {
+      Data: {
+        Samples: [
+          pressureSample(0, 250),
+          pressureSample(20, 240),
+          pressureSample(40, 230),
+          pressureSample(60, 220),
+          pressureSample(150, 190),
+        ],
+      },
+      Summary: {
+        Samples: [
+          {
+            Attributes: {
+              "suunto/sml": {
+                DiveFooter: { Gases: [{ StartPressure: 25000000, EndPressure: 19000000 }] },
+                Windows: [{ Type: "Dive", DiveTime: 150, Depth: [{ Max: 10, Avg: 10 }] }],
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.profile.points.map((point) => point.gasConsumptionRate)).toEqual([
+      null, // t=0: no history at all
+      null, // t=20s: less than a full minute of history -- suppressed, not a noisy partial rate
+      null, // t=40s: same
+      30, // t=60s: first full 1-minute window, correctly averages to the true 30 bar/min rate
+      null, // t=150s: nearest prior sample is 90s back, outside the 1-minute window -- no rate
+    ]);
+  });
 });

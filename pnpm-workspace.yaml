@@ -2,6 +2,7 @@ packages:
   - .
 
 allowBuilds:
+  esbuild: true
   msw: false
   protobufjs: true
   sharp: true

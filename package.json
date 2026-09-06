@@ -21,6 +21,7 @@
     "padi:refresh": "node scripts/padi-token-refresh.mjs",
     "padi:debug-logbook": "node scripts/padi/debug-logbook.mjs",
     "suunto:sidecar": "node scripts/suunto-sidecar/server.mjs",
+    "suunto:backfill-gas-rate": "tsx scripts/backfill-suunto-gas-rate.ts",
     "lint:unused": "knip"
   },
   "dependencies": {
@@ -68,6 +69,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
     "knip": "^6.15.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.5.3",
     "vitest": "^4.1.8"
   }

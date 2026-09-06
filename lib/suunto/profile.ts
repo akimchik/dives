@@ -96,7 +96,9 @@ function round(value: number | null, digits = 2): number | null {
 // pressure since the earliest sample within the trailing 1-minute window. Points are already
 // ordered by time, so the window's start only ever moves forward -- one pass with a two-pointer
 // walk instead of a per-point scan.
-function computeGasConsumptionRate(points: SuuntoDiveProfilePoint[]): (number | null)[] {
+function computeGasConsumptionRate(
+  points: Pick<SuuntoDiveProfilePoint, "time" | "gasConsumption">[],
+): (number | null)[] {
   const windowMinutes = 1;
   let start = 0;
   return points.map((point, index) => {
@@ -106,6 +108,11 @@ function computeGasConsumptionRate(points: SuuntoDiveProfilePoint[]): (number | 
     const windowStart = points[start];
     const elapsedMinutes = point.time - windowStart.time;
     if (windowStart.gasConsumption === null || elapsedMinutes <= 0) return null;
+    // `start` only stays at 0 while no sample old enough to fill a full window exists yet (the
+    // dive's first minute). gasConsumption is quantized to 0.1 bar, so a rate over a much shorter
+    // partial window amplifies that quantization into misleadingly spiky early values -- wait for
+    // a full window rather than report them.
+    if (start === 0 && elapsedMinutes < windowMinutes) return null;
 
     return round((point.gasConsumption - windowStart.gasConsumption) / elapsedMinutes, 2);
   });
@@ -298,14 +305,17 @@ export function compileSuuntoDiveProfile(
   const tankSizeLitres = firstNumber(headerGas.TankSize);
   const tankSize = tankSizeLitres === null ? null : round(tankSizeLitres * (tankSizeLitres < 1 ? 1000 : 1), 1);
 
-  const rawPoints: SuuntoDiveProfilePoint[] = [];
+  // gasConsumptionRate is deliberately absent here: unlike its siblings it isn't a last-known-value
+  // carried forward sample-to-sample, but a windowed derivative computed in one pass over the whole
+  // series below, so keeping it out of this type prevents a future edit from wiring in a stale
+  // carry-forward for it by copying the `x ?? previous.x` pattern.
+  const preRatePoints: Omit<SuuntoDiveProfilePoint, "gasConsumptionRate">[] = [];
   let firstTimestampMs: number | null = null;
-  let previous: Omit<SuuntoDiveProfilePoint, "time" | "timestamp"> = {
+  let previous: Omit<SuuntoDiveProfilePoint, "time" | "timestamp" | "gasConsumptionRate"> = {
     depth: null,
     temperature: null,
     tankPressure: null,
     gasConsumption: null,
-    gasConsumptionRate: null,
   };
 
   for (const wrapper of dataSamples) {
@@ -329,14 +339,15 @@ export function compileSuuntoDiveProfile(
       temperature: temperature ?? previous.temperature,
       tankPressure: tankPressure ?? previous.tankPressure,
       gasConsumption: gasConsumption ?? previous.gasConsumption,
-      gasConsumptionRate: null,
     };
-    rawPoints.push({ time: round(time, 3) ?? 0, timestamp, ...previous });
+    preRatePoints.push({ time: round(time, 3) ?? 0, timestamp, ...previous });
   }
 
-  computeGasConsumptionRate(rawPoints).forEach((rate, index) => {
-    rawPoints[index].gasConsumptionRate = rate;
-  });
+  const gasConsumptionRates = computeGasConsumptionRate(preRatePoints);
+  const rawPoints: SuuntoDiveProfilePoint[] = preRatePoints.map((point, index) => ({
+    ...point,
+    gasConsumptionRate: gasConsumptionRates[index],
+  }));
 
   const depthProfile = rawPoints
     .filter((point): point is SuuntoDiveProfilePoint & { depth: number } => point.depth !== null)

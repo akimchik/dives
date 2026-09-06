@@ -11,8 +11,9 @@ import {
 } from "@/components/ui/select";
 import type { DailyDiveCount } from "@/lib/dives";
 
-// Dependency-free inline SVG (no chart library) -- same convention as DepthProfileChart. A
-// GitHub-style contribution grid, one row per calendar year (Jan 1 - Dec 31, most recent on top)
+// Dependency-free inline SVG (no chart library) -- this grid's shape (a calendar heatmap) doesn't
+// map onto shadcn's chart primitives, unlike the recharts-based profile charts. A GitHub-style
+// contribution grid, one row per calendar year (Jan 1 - Dec 31, most recent on top)
 // rather than a rolling 52-week block, so each row reads as an actual year.
 // Sequential encoding (dive count -> one hue, light to dark) uses this app's own --primary token
 // at increasing opacity rather than a separate literal palette, so it stays correct in both themes

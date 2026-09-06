@@ -230,3 +230,22 @@ Rename "Sync PADI" to "Fetch PADI" and add "Fetch Suunto" buttons to Dashboard
 ## 2026-09-06 20:25 CEST — Suunto Merge Field Dialog Missing
 
 The merge of suunto dive still does not show dialog to select surviving fields
+
+## 2026-09-06 21:03 CEST — Area Chart For Dive Profiles (Issue #12)
+
+> /autopilot implement https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/12 feature now
+
+Issue #12: "Switch dive profile chart to area chart shadcn/ui" — use shadcn's Area Chart -
+Gradient, make data streams switchable (toggle), and show tooltips. The repo has two dive-profile
+charts (`DepthProfileChart`, single depth stream; `SuuntoProfileChart`, four streams: depth,
+temperature, tank pressure, gas consumption); asked the user whether to scope this to just the
+multi-stream Suunto chart or both — user chose both. Added shadcn's `chart.tsx`, `toggle.tsx`,
+`toggle-group.tsx` (pulling in `recharts`) via `pnpm dlx shadcn@latest add chart toggle-group`,
+fixed a broken `import { cn } from "cn"` the registry generated in all three files (should be
+`@/lib/utils`; removed the stray `cn` npm package it had also installed), and rewrote both charts
+as client components using `ChartContainer`/`Area`/gradient fills. `SuuntoProfileChart` uses a
+single-select `ToggleGroup` to switch which one stream is shown, since the four streams' units
+(m/°C/bar) don't share a scale. Found and fixed a real bug during manual QA: shadcn's
+`ChartTooltipContent`'s `labelFormatter` isn't handed the raw numeric x-axis value for a
+non-categorical axis — it resolves to the series' config label instead — so both charts now pull
+the real time straight off the hovered point's payload.

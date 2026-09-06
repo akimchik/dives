@@ -16,6 +16,7 @@ import {
   countPendingSuuntoImports,
   deleteSuuntoImport,
   getSuuntoDuplicateStatuses,
+  getNextPendingSuuntoImportId,
   listPendingSuuntoImports,
   stageSuuntoImport,
 } from "@/lib/suunto/imports";
@@ -37,6 +38,10 @@ import {
 const UNAVAILABLE_ERROR = "Suunto import is temporarily unavailable. Please try again later.";
 
 export type SuuntoActionResult = { ok: true } | { ok: false; error: string };
+
+export type DeleteSuuntoImportActionResult =
+  | { ok: true; nextImportId: number | null; pendingCount: number }
+  | { ok: false; error: string };
 
 export type FetchSuuntoActionResult =
   | {
@@ -323,15 +328,21 @@ export async function mergeSuuntoDiveImportAction(
   }
 }
 
-export async function deleteSuuntoImportAction(importId: number): Promise<SuuntoActionResult> {
+export async function deleteSuuntoImportAction(importId: number): Promise<DeleteSuuntoImportActionResult> {
   const user = await requireUser();
+  const nextBeforeDelete = await getNextPendingSuuntoImportId(user.id, importId);
   const deleted = await deleteSuuntoImport(user.id, importId);
 
   if (!deleted) {
     return { ok: false, error: "That Suunto import is no longer available." };
   }
 
+  const pendingCount = await countPendingSuuntoImports(user.id);
+  const nextImportId =
+    nextBeforeDelete ?? (pendingCount > 0 ? (await listPendingSuuntoImports(user.id))[0]?.id ?? null : null);
+
   revalidatePath("/settings/integrations");
   revalidatePath(`/settings/integrations/suunto/imports/${importId}`);
-  return { ok: true };
+  if (nextImportId !== null) revalidatePath(`/settings/integrations/suunto/imports/${nextImportId}`);
+  return { ok: true, nextImportId, pendingCount };
 }

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,9 +33,11 @@ export type SuuntoConnectStatus = {
 export function SuuntoConnectForm({
   status,
   pendingCount,
+  firstPendingImportId,
 }: {
   status: SuuntoConnectStatus;
   pendingCount: number;
+  firstPendingImportId: number | null;
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -107,9 +110,19 @@ export function SuuntoConnectForm({
           {status.lastFetchAt ? ` Last fetched ${new Date(status.lastFetchAt).toLocaleString()}.` : ""}
         </p>
         {pendingCount > 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {pendingCount} staged {pendingCount === 1 ? "dive is" : "dives are"} waiting for review.
-          </p>
+          <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+            <p>
+              {pendingCount} staged {pendingCount === 1 ? "dive is" : "dives are"} waiting for review.
+            </p>
+            {firstPendingImportId !== null ? (
+              <Link
+                href={`/settings/integrations/suunto/imports/${firstPendingImportId}`}
+                className="w-fit rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground no-underline hover:bg-primary/90"
+              >
+                Review staged dives
+              </Link>
+            ) : null}
+          </div>
         ) : null}
         <div className="flex flex-wrap gap-2">
           <Dialog open={fetchOpen} onOpenChange={(open) => !isPending && setFetchOpen(open)}>

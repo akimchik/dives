@@ -214,3 +214,7 @@ It loads dives now. Let's improve: let's find out why dive site location is not 
 
 ## 2026-09-06 17:25 CEST — Suunto Draft Coordinates Missing
 The end bar, avg depth, bottom time, gas type (air), are now working, but lat/lon are missing still for the imported suunto dive.
+
+## 2026-09-06 18:13 CEST — Suunto Queue Navigation And Coordinates
+
+Some coords appear, but looks like they are not from the workout but from some other workout. Also Integrations page now shows: 4 staged dives are waiting for review. -- How to open them? Also when fetching from suunto 10 days, a first staged dive appear on the Review Suunto dive. If I delete it I am at the Integrations page again, same if I choose Cancel. Why next staged dive is not displayed if I choose delete?

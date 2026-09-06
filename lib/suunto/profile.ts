@@ -163,15 +163,41 @@ function degreesFromSuuntoCoordinate(value: unknown): number | null {
   return round(degrees, 6);
 }
 
-function firstLocation(summary: JsonRecord): { lat: number; lng: number } | null {
-  const footer = asRecord(summary.DiveFooter);
-  const location = asRecord(footer.LastKnownCoordinates);
-  const stop = asRecord(asRecord(footer.DiveLocation).Stop);
-  const start = asRecord(asRecord(footer.DiveLocation).Start);
-
-  const lat = degreesFromSuuntoCoordinate(location.Latitude ?? stop.Latitude ?? start.Latitude);
-  const lng = degreesFromSuuntoCoordinate(location.Longitude ?? stop.Longitude ?? start.Longitude);
+function coordinatePair(record: JsonRecord): { lat: number; lng: number } | null {
+  const lat = degreesFromSuuntoCoordinate(record.Latitude ?? record.latitude ?? record.Lat ?? record.lat);
+  const lng = degreesFromSuuntoCoordinate(
+    record.Longitude ?? record.longitude ?? record.Lng ?? record.lng ?? record.Lon ?? record.lon,
+  );
   return lat === null || lng === null ? null : { lat, lng };
+}
+
+function firstDataLocation(root: JsonRecord): { lat: number; lng: number } | null {
+  const dataSamples = asRecord(root.Data).Samples;
+  const samples = Array.isArray(dataSamples) ? dataSamples : [];
+
+  for (const wrapper of samples) {
+    const sample = sampleRecord(wrapper);
+    const routeOrigin = coordinatePair(asRecord(sample.DiveRouteOrigin));
+    if (routeOrigin) return routeOrigin;
+
+    const sampleLocation = coordinatePair(sample);
+    if (sampleLocation) return sampleLocation;
+  }
+
+  return null;
+}
+
+function firstLocation(root: JsonRecord, summary: JsonRecord): { lat: number; lng: number } | null {
+  const footer = asRecord(summary.DiveFooter);
+  const stop = coordinatePair(asRecord(asRecord(footer.DiveLocation).Stop));
+  const start = coordinatePair(asRecord(asRecord(footer.DiveLocation).Start));
+  const dataLocation = firstDataLocation(root);
+
+  // `LastKnownCoordinates` can be a stale watch/app location unrelated to a dive when the workout
+  // itself has no GPS route (observed exports have zero workout positions and no dive route origin,
+  // but a non-zero LastKnownCoordinates from elsewhere). Ignore it unless Suunto also provides a
+  // workout-scoped route/location source.
+  return stop ?? start ?? dataLocation;
 }
 
 function hasDiveMarkers(root: JsonRecord, diveSummary: JsonRecord): boolean {
@@ -324,7 +350,7 @@ export function compileSuuntoDiveProfile(
     tankEndPressure: endPressure,
     tankSizeLitres: tankSize,
     gasMix: firstGasMix(diveSummary),
-    location: firstLocation(diveSummary),
+    location: firstLocation(root, diveSummary),
     points: rawPoints,
     depthProfile,
     summary: diveSummary,

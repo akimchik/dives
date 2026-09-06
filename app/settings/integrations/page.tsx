@@ -9,7 +9,7 @@ import { SuuntoConnectForm } from "@/components/suunto-connect-form";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
 import { getSuuntoIntegrationStatus } from "@/lib/suunto/integrations";
-import { countPendingSuuntoImports } from "@/lib/suunto/imports";
+import { countPendingSuuntoImports, getFirstPendingSuuntoImportId } from "@/lib/suunto/imports";
 
 export const metadata: Metadata = {
   title: "Integrations · Dives",
@@ -17,10 +17,11 @@ export const metadata: Metadata = {
 
 export default async function IntegrationsPage() {
   const user = await requireUser("/settings/integrations");
-  const [padiStatus, suuntoStatus, pendingSuuntoImports] = await Promise.all([
+  const [padiStatus, suuntoStatus, pendingSuuntoImports, firstPendingSuuntoImportId] = await Promise.all([
     getPadiIntegrationStatus(user.id),
     getSuuntoIntegrationStatus(user.id),
     countPendingSuuntoImports(user.id),
+    getFirstPendingSuuntoImportId(user.id),
   ]);
 
   return (
@@ -67,6 +68,7 @@ export default async function IntegrationsPage() {
                   : null
               }
               pendingCount={pendingSuuntoImports}
+              firstPendingImportId={firstPendingSuuntoImportId}
             />
             <p className="text-xs text-muted-foreground">
               Suunto fetch checks the latest workouts you choose, stages only dive workouts for

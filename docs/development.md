@@ -309,10 +309,19 @@ chart/form code. Suunto SML exports can split `DiveHeader`, `DiveFooter`,
 `Windows`, and `Header` across separate summary samples; the parser merges those
 rows before extracting average depth, dive/bottom time, pressure endpoints and
 location. Exported workout metadata does not include a human-readable site name,
-and may carry zeroed top-level positions; when SML footer coordinates are present
-they are converted from radians to degrees and drafted as a coordinate-named site
-(`Suunto GPS <lat>, <lng>`) for user review. Plain air is normalized to `Air`
-rather than `Air 21% O₂`.
+and may carry zeroed top-level positions. Coordinates are drafted only from
+workout-scoped SML sources: `DiveLocation.Stop`, `DiveLocation.Start`,
+`DiveRouteOrigin`, or per-sample latitude/longitude. Lone `LastKnownCoordinates`
+values are ignored because observed Suunto exports can carry a stale watch/app
+location from another workout when the dive itself has no GPS route. Accepted
+coordinates are converted from radians to degrees when needed and drafted as a
+coordinate-named site (`Suunto GPS <lat>, <lng>`) for user review. Plain air is
+normalized to `Air` rather than `Air 21% O₂`.
+
+The Integrations page shows a `Review staged dives` link whenever pending Suunto
+imports exist. The review queue is ordered by workout time; save, merge, delete,
+and cancel continue to the next staged item when one exists, otherwise they
+return to the normal destination.
 
 The Suunto review form can either save the staged import as a new dive or merge it
 into an existing user-owned dive. Merge candidates are existing dives without a

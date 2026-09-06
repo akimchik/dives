@@ -9,7 +9,11 @@ import { DiveForm } from "@/components/dive-form";
 import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
 import { Card, CardContent } from "@/components/ui/card";
 import { listSuuntoMergeDiveCandidates } from "@/lib/dives";
-import { getPendingSuuntoImport } from "@/lib/suunto/imports";
+import {
+  getFirstPendingSuuntoImportId,
+  getNextPendingSuuntoImportId,
+  getPendingSuuntoImport,
+} from "@/lib/suunto/imports";
 import { requireUser } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -26,7 +30,12 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
   const pending = await getPendingSuuntoImport(user.id, importId);
   if (!pending || pending.id !== importId) notFound();
 
-  const mergeCandidates = await listSuuntoMergeDiveCandidates(user.id, pending.workout_started_at);
+  const [mergeCandidates, nextPendingImportId, firstPendingImportId] = await Promise.all([
+    listSuuntoMergeDiveCandidates(user.id, pending.workout_started_at),
+    getNextPendingSuuntoImportId(user.id, pending.id),
+    getFirstPendingSuuntoImportId(user.id),
+  ]);
+  const cancelImportId = nextPendingImportId ?? (pending.remaining_count > 1 ? firstPendingImportId : null);
 
   return (
     <AppShell email={user.email}>
@@ -62,7 +71,9 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
         <DiveForm
           draftDive={pending.draft_dive}
           suuntoImportId={pending.id}
-          cancelHref="/settings/integrations"
+          cancelHref={
+            cancelImportId === null ? "/settings/integrations" : `/settings/integrations/suunto/imports/${cancelImportId}`
+          }
           submitLabel="Save Suunto dive"
           suuntoMergeCandidates={mergeCandidates.map((dive) => ({
             id: dive.id,

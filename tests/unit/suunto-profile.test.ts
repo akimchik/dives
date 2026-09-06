@@ -110,7 +110,8 @@ describe("compileSuuntoDiveProfile", () => {
               "suunto/sml": {
                 DiveFooter: {
                   Gases: [{ StartPressure: 18460938, EndPressure: 9410938 }],
-                  LastKnownCoordinates: { Latitude: 0.9031027318196329, Longitude: 0.0678412674202727 },
+                  DiveLocation: { Stop: { Latitude: 0.9031027318196329, Longitude: 0.0678412674202727 } },
+                  LastKnownCoordinates: { Latitude: 0.9140264491565633, Longitude: 0.09079550612994425 },
                 },
               },
             },
@@ -134,6 +135,95 @@ describe("compileSuuntoDiveProfile", () => {
       lat: 51.743975,
       lng: 3.887018,
     });
+  });
+
+  it("ignores lone LastKnownCoordinates because they can be stale from another workout", () => {
+    const result = compileSuuntoDiveProfile("stale-location", {
+      Data: {
+        Samples: [
+          {
+            TimeISO8601: "2026-08-30T10:40:08.250+02:00",
+            Attributes: {
+              "suunto/sml": {
+                Sample: {
+                  Depth: 1,
+                  DiveRouteOrigin: { Latitude: 0, Longitude: 0 },
+                },
+              },
+            },
+          },
+          {
+            TimeISO8601: "2026-08-30T10:41:08.250+02:00",
+            Attributes: { "suunto/sml": { Sample: { Depth: 8 } } },
+          },
+        ],
+      },
+      Summary: {
+        Samples: [
+          {
+            Attributes: {
+              "suunto/sml": {
+                DiveFooter: {
+                  DiveLocation: {
+                    Start: { Latitude: null, Longitude: null },
+                    Stop: { Latitude: null, Longitude: null },
+                  },
+                  LastKnownCoordinates: { Latitude: 0.9140264491565633, Longitude: 0.09079550612994425 },
+                },
+                Windows: [{ Type: "Dive", DiveTime: 1800, Depth: [{ Max: 8, Avg: 4 }] }],
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.profile.location).toBeNull();
+    expect(result.draftDive.site).toBeNull();
+  });
+
+  it("prefers workout-scoped route coordinates over footer LastKnownCoordinates", () => {
+    const result = compileSuuntoDiveProfile("route-location", {
+      Data: {
+        Samples: [
+          {
+            TimeISO8601: "2026-08-30T10:40:08.250+02:00",
+            Attributes: {
+              "suunto/sml": {
+                Sample: {
+                  Depth: 1,
+                  DiveRouteOrigin: { Latitude: 51.70314025878906, Longitude: 4.0082502365112305 },
+                },
+              },
+            },
+          },
+          {
+            TimeISO8601: "2026-08-30T10:41:08.250+02:00",
+            Attributes: { "suunto/sml": { Sample: { Depth: 8 } } },
+          },
+        ],
+      },
+      Summary: {
+        Samples: [
+          {
+            Attributes: {
+              "suunto/sml": {
+                DiveFooter: {
+                  LastKnownCoordinates: { Latitude: 0.9140264491565633, Longitude: 0.09079550612994425 },
+                },
+                Windows: [{ Type: "Dive", DiveTime: 1800, Depth: [{ Max: 8, Avg: 4 }] }],
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.profile.location).toEqual({ lat: 51.70314, lng: 4.00825 });
   });
 
   it("rejects non-dive workouts even when they have Data.Samples", () => {

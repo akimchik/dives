@@ -96,6 +96,45 @@ export async function getSuuntoDuplicateStatuses(
   return statuses;
 }
 
+export async function getFirstPendingSuuntoImportId(userId: string): Promise<number | null> {
+  const result = await queryRead<{ id: number }>(
+    `
+      select id
+      from suunto_imports
+      where user_id = $1
+      order by coalesce(workout_started_at, created_at) asc, id asc
+      limit 1
+    `,
+    [userId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+export async function getNextPendingSuuntoImportId(userId: string, currentImportId: number): Promise<number | null> {
+  const result = await queryRead<{ id: number }>(
+    `
+      with ordered as (
+        select
+          id,
+          row_number() over (order by coalesce(workout_started_at, created_at) asc, id asc) as position
+        from suunto_imports
+        where user_id = $1
+      ),
+      current_position as (
+        select position from ordered where id = $2
+      )
+      select ordered.id
+      from ordered
+      cross join current_position
+      where ordered.position > current_position.position
+      order by ordered.position asc
+      limit 1
+    `,
+    [userId, currentImportId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function countPendingSuuntoImports(userId: string): Promise<number> {
   const result = await queryRead<{ count: string }>(
     "select count(*) as count from suunto_imports where user_id = $1",

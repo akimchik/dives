@@ -19,9 +19,17 @@ export function DeleteSuuntoImportButton({ importId }: { importId: number }) {
         toast.error(result.error);
         return;
       }
-      toast.success("Suunto import deleted.");
+      toast.success(
+        result.nextImportId !== null
+          ? `Suunto import deleted. ${result.pendingCount} staged ${result.pendingCount === 1 ? "dive remains" : "dives remain"}.`
+          : "Suunto import deleted.",
+      );
       router.refresh();
-      router.push("/settings/integrations");
+      router.push(
+        result.nextImportId !== null
+          ? `/settings/integrations/suunto/imports/${result.nextImportId}`
+          : "/settings/integrations",
+      );
     });
   }
 

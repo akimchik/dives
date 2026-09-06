@@ -49,7 +49,7 @@ process.env.SUUNTO_SIDECAR_URL = "http://127.0.0.1:4817";
 
 const { createSession } = await import("@/lib/session");
 const { createUser } = await import("@/lib/users");
-const { connectSuuntoAction, fetchSuuntoWorkoutsAction } = await import("@/app/actions/suunto");
+const { connectSuuntoAction, deleteSuuntoImportAction, fetchSuuntoWorkoutsAction } = await import("@/app/actions/suunto");
 const { stageSuuntoImport } = await import("@/lib/suunto/imports");
 
 async function loginAsNewUser() {
@@ -90,6 +90,40 @@ function smlFixture(workoutKey: string) {
     },
     _fixtureKey: workoutKey,
   };
+}
+
+function stagedProfile(workoutKey: string, startedAt: string) {
+  return {
+    source: "suunto" as const,
+    version: 1 as const,
+    workoutKey,
+    startedAt,
+    durationMinutes: 30,
+    maxDepth: 8,
+    averageDepth: 4,
+    waterTemperature: 20,
+    waterTemperatureLow: 20,
+    tankStartPressure: 190,
+    tankEndPressure: 120,
+    tankSizeLitres: 12,
+    gasMix: "Air",
+    location: null,
+    points: [],
+    depthProfile: [],
+    summary: {},
+  };
+}
+
+async function stageQueueImport(userId: string, label: string, startedAt: string) {
+  const workoutKey = `${label}-${randomUUID()}`;
+  return stageSuuntoImport(userId, {
+    workoutKey,
+    workoutStartedAt: startedAt,
+    summary: {},
+    draftDive: {},
+    compiledProfile: stagedProfile(workoutKey, startedAt),
+    originalBundle: Buffer.from(label),
+  });
 }
 
 async function purgeOwnUsers() {
@@ -143,25 +177,7 @@ describe("Suunto server actions", () => {
       workoutStartedAt: "2026-08-30T08:40:08.250Z",
       summary: {},
       draftDive: {},
-      compiledProfile: {
-        source: "suunto",
-        version: 1,
-        workoutKey: alreadyStagedKey,
-        startedAt: "2026-08-30T08:40:08.250Z",
-        durationMinutes: 30,
-        maxDepth: 8,
-        averageDepth: 4,
-        waterTemperature: 20,
-        waterTemperatureLow: 20,
-        tankStartPressure: 190,
-        tankEndPressure: 120,
-        tankSizeLitres: 12,
-        gasMix: "Air",
-        location: null,
-        points: [],
-        depthProfile: [],
-        summary: {},
-      },
+      compiledProfile: stagedProfile(alreadyStagedKey, "2026-08-30T08:40:08.250Z"),
       originalBundle: Buffer.from("staged"),
     });
     await getTestPool().query(
@@ -190,5 +206,16 @@ describe("Suunto server actions", () => {
     });
     expect(exportSuuntoWorkoutMock).toHaveBeenCalledTimes(1);
     expect(exportSuuntoWorkoutMock).toHaveBeenCalledWith('{"session":"fetch"}', newKey);
+  });
+
+  it("returns the next staged import after deleting the current review item", async () => {
+    const user = await loginAsNewUser();
+    const first = await stageQueueImport(user.id, "queue-first", "2026-08-29T09:08:00.000Z");
+    const second = await stageQueueImport(user.id, "queue-second", "2026-08-30T08:40:00.000Z");
+    if (!first.staged || !second.staged) throw new Error("expected staged imports");
+
+    const deleted = await deleteSuuntoImportAction(first.id);
+
+    expect(deleted).toEqual({ ok: true, nextImportId: second.id, pendingCount: 1 });
   });
 });

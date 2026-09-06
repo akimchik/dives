@@ -415,7 +415,7 @@ function suuntoProfile(workoutKey: string): SuuntoDiveProfile {
     tankEndPressure: 94.1,
     tankSizeLitres: 14,
     gasMix: "Air",
-    location: null,
+    location: { lat: 51.743975, lng: 3.887018 },
     points: [
       {
         time: 0,
@@ -452,6 +452,12 @@ async function stageSuunto(owner: Owner, workoutKey = `suunto-${randomUUID()}`) 
       title: "Suunto draft",
       occurredAt: profile.startedAt ?? undefined,
       maxDepth: profile.maxDepth,
+      site: {
+        name: "Suunto GPS 51.7440, 3.8870",
+        location: "51.743975, 3.887018",
+        lat: 51.743975,
+        lng: 3.887018,
+      },
       depthProfile: profile.depthProfile,
     },
     compiledProfile: profile,
@@ -466,12 +472,28 @@ describe("createDiveFromSuuntoImport (human-reviewed staged import path)", () =>
     const owner = await createOwner();
     const staged = await stageSuunto(owner);
 
-    const result = await createDiveFromSuuntoImport(owner, staged.id, diveInput({ title: "Reviewed Suunto dive" }));
+    const result = await createDiveFromSuuntoImport(
+      owner,
+      staged.id,
+      diveInput({
+        title: "Reviewed Suunto dive",
+        site: {
+          name: "Suunto GPS 51.7440, 3.8870",
+          location: "51.743975, 3.887018",
+          lat: 51.743975,
+          lng: 3.887018,
+        },
+      }),
+    );
     expect(result.inserted).toBe(true);
     if (!result.inserted) throw new Error("expected insert");
 
     const stored = await getDive(owner.id, result.dive.id);
     expect(stored?.title).toBe("Reviewed Suunto dive");
+    expect(stored?.site_name).toBe("Suunto GPS 51.7440, 3.8870");
+    expect(stored?.site_location).toBe("51.743975, 3.887018");
+    expect(Number(stored?.site_lat)).toBeCloseTo(51.743975);
+    expect(Number(stored?.site_lng)).toBeCloseTo(3.887018);
     expect(stored?.suunto_workout_key).toBe(staged.workoutKey);
     expect(stored?.suunto_profile).toMatchObject({ source: "suunto", workoutKey: staged.workoutKey });
     expect(stored?.padi_dive_id).toBeNull();

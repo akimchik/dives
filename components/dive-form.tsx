@@ -201,6 +201,22 @@ function stateFromDive(dive: DiveRecord): FormState {
   };
 }
 
+
+function siteStateFromDraft(site: Partial<DiveInput>["site"] | undefined): DiveSiteFieldValue {
+  if (!site) return emptyDiveSite;
+  if ("id" in site) {
+    return { ...emptyDiveSite, siteId: site.id };
+  }
+
+  return {
+    siteId: null,
+    name: site.name ?? "",
+    location: site.location ?? "",
+    lat: site.lat === null || site.lat === undefined ? "" : String(site.lat),
+    lng: site.lng === null || site.lng === undefined ? "" : String(site.lng),
+  };
+}
+
 function stateFromDraft(draft: Partial<DiveInput>): FormState {
   const state = blankState();
 
@@ -208,6 +224,7 @@ function stateFromDraft(draft: Partial<DiveInput>): FormState {
     ...state,
     title: draft.title ?? state.title,
     occurredAt: draft.occurredAt ? toDateTimeLocalValue(new Date(draft.occurredAt)) : state.occurredAt,
+    site: siteStateFromDraft(draft.site),
     maxDepth: draft.maxDepth === null || draft.maxDepth === undefined ? "" : String(draft.maxDepth),
     avgDepth: draft.avgDepth === null || draft.avgDepth === undefined ? "" : String(draft.avgDepth),
     bottomTimeMinutes:

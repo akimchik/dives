@@ -565,20 +565,34 @@ describe("createDiveFromSuuntoImport (human-reviewed staged import path)", () =>
     const staged = await stageSuunto(owner);
 
     const candidates = await listSuuntoMergeDiveCandidates(owner.id, staged.profile.startedAt);
-    expect(candidates[0]).toMatchObject({ id: target.id, title: "Existing handwritten dive" });
+    expect(candidates[0]).toMatchObject({
+      id: target.id,
+      title: "Existing handwritten dive",
+      max_depth: "1.00",
+      bottom_time_minutes: 1,
+    });
 
     const result = await mergeSuuntoImportIntoDive(
       owner,
       staged.id,
       target.id,
-      diveInput({ title: "Reviewed merge", maxDepth: 8.82, endPressure: 94.1 }),
+      diveInput({
+        title: "Existing handwritten dive",
+        occurredAt: "2026-08-30T08:41:00.000Z",
+        maxDepth: 8.82,
+        bottomTimeMinutes: 1,
+        endPressure: 94.1,
+      }),
     );
 
     expect(result.merged).toBe(true);
     if (!result.merged) throw new Error("expected merge");
 
     const stored = await getDive(owner.id, target.id);
-    expect(stored?.title).toBe("Reviewed merge");
+    expect(stored?.title).toBe("Existing handwritten dive");
+    expect(stored?.bottom_time_minutes).toBe(1);
+    expect(stored?.max_depth).toBe("8.82");
+    expect(stored?.end_pressure).toBe("94.10");
     expect(stored?.suunto_workout_key).toBe(staged.workoutKey);
     expect(stored?.suunto_profile).toMatchObject({ source: "suunto", workoutKey: staged.workoutKey });
     expect(stored?.padi_dive_id).toBeNull();

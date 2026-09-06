@@ -63,15 +63,6 @@ const WEIGHT_FEEDBACK = ["Underweight", "Perfect", "Overweight"];
 const WATER_TYPES = ["Salt", "Fresh", "Brackish"];
 const BODIES_OF_WATER = ["Ocean", "Lake", "Quarry", "River"];
 
-export type SuuntoMergeCandidate = {
-  id: number;
-  title: string | null;
-  occurredAt: string;
-  maxDepth: string | null;
-  bottomTimeMinutes: number | null;
-  siteName: string | null;
-};
-
 type FormState = {
   title: string;
   occurredAt: string;
@@ -108,6 +99,60 @@ type FormState = {
   rating: number | null;
   depthProfileRaw: string;
 };
+
+type MergeSource = "import" | "target";
+
+type MergeFieldKey = keyof FormState;
+
+type SuuntoMergeCandidateValues = FormState & {
+  depthProfile: unknown;
+};
+
+export type SuuntoMergeCandidate = {
+  id: number;
+  title: string | null;
+  occurredAt: string;
+  maxDepth: string | null;
+  bottomTimeMinutes: number | null;
+  siteName: string | null;
+  values: SuuntoMergeCandidateValues;
+};
+
+const mergeFields: Array<{ key: MergeFieldKey; label: string }> = [
+  { key: "title", label: "Title" },
+  { key: "occurredAt", label: "Date & time" },
+  { key: "site", label: "Dive site" },
+  { key: "maxDepth", label: "Max depth" },
+  { key: "avgDepth", label: "Average depth" },
+  { key: "bottomTimeMinutes", label: "Bottom time" },
+  { key: "waterTemp", label: "Water temp" },
+  { key: "waterTempLow", label: "Lowest temp" },
+  { key: "airTemp", label: "Air temp" },
+  { key: "visibility", label: "Visibility" },
+  { key: "gasMix", label: "Gas mix" },
+  { key: "tankInfo", label: "Cylinder" },
+  { key: "cylinderSize", label: "Cylinder size" },
+  { key: "startPressure", label: "Start pressure" },
+  { key: "endPressure", label: "End pressure" },
+  { key: "weight", label: "Weight" },
+  { key: "weightFeedback", label: "Weighting" },
+  { key: "suitType", label: "Suit" },
+  { key: "hood", label: "Hood" },
+  { key: "gloves", label: "Gloves" },
+  { key: "boots", label: "Boots" },
+  { key: "buddy", label: "Buddy" },
+  { key: "diveShop", label: "Dive shop" },
+  { key: "current", label: "Current" },
+  { key: "surge", label: "Surge" },
+  { key: "waves", label: "Waves" },
+  { key: "weather", label: "Weather" },
+  { key: "waterType", label: "Water type" },
+  { key: "bodyOfWater", label: "Body of water" },
+  { key: "entryType", label: "Entry type" },
+  { key: "notes", label: "Notes" },
+  { key: "rating", label: "Rating" },
+  { key: "depthProfileRaw", label: "Depth profile" },
+];
 
 function blankState(): FormState {
   return {
@@ -408,6 +453,32 @@ function formatCandidate(candidate: SuuntoMergeCandidate): string {
   return `${when}${details.length ? ` · ${details.join(" · ")}` : ""}`;
 }
 
+function formatMergeValue(value: FormState[MergeFieldKey]): string {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  if (value === null) return "--";
+  if (typeof value === "string") return value === NONE ? "--" : value.trim() || "--";
+
+  const site = value as DiveSiteFieldValue;
+  return [site.name, site.location, site.lat && site.lng ? `${site.lat}, ${site.lng}` : null]
+    .filter(Boolean)
+    .join(" · ") || "--";
+}
+
+function mergeStates(
+  imported: FormState,
+  target: SuuntoMergeCandidateValues,
+  choices: Record<MergeFieldKey, MergeSource>,
+): FormState {
+  const merged = { ...imported };
+  for (const field of mergeFields) {
+    if (choices[field.key] === "target") {
+      merged[field.key] = target[field.key] as never;
+    }
+  }
+  return merged;
+}
+
 // Optional convenience, not a bound form field -- deliberately uncontrolled, so after a pick the
 // trigger just shows that option's own label rather than needing to reset back to a placeholder.
 function RecentCylinderPicker({
@@ -501,7 +572,11 @@ export function DiveForm({
   );
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<number | null>(suuntoMergeCandidates[0]?.id ?? null);
+  const [mergeChoices, setMergeChoices] = useState<Record<MergeFieldKey, MergeSource>>(() =>
+    Object.fromEntries(mergeFields.map((field) => [field.key, "import"])) as Record<MergeFieldKey, MergeSource>,
+  );
   const [isPending, startTransition] = useTransition();
+  const neutralPlaceholder = (example: string) => (dive ? "--" : example);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setState((previous) => ({ ...previous, [key]: value }));
@@ -539,43 +614,53 @@ export function DiveForm({
     return false;
   }
 
-  function buildInput(): DiveInput {
+  function buildInputFromState(source: FormState, fallbackDepthProfile: unknown): DiveInput {
+    const sourceProfileResult = source.depthProfileRaw.trim() ? parseDepthProfile(source.depthProfileRaw) : null;
+
     return {
-      site: toSiteSelection(state.site),
-      title: optionalText(state.title),
-      occurredAt: new Date(state.occurredAt),
-      maxDepth: optionalNumber(state.maxDepth),
-      avgDepth: optionalNumber(state.avgDepth),
-      bottomTimeMinutes: optionalNumber(state.bottomTimeMinutes),
-      waterTemp: optionalNumber(state.waterTemp),
-      waterTempLow: optionalNumber(state.waterTempLow),
-      airTemp: optionalNumber(state.airTemp),
-      visibility: optionalNumber(state.visibility),
-      gasMix: optionalText(state.gasMix),
-      tankInfo: optionalText(state.tankInfo),
-      cylinderSize: optionalNumber(state.cylinderSize),
-      startPressure: optionalNumber(state.startPressure),
-      endPressure: optionalNumber(state.endPressure),
-      weight: optionalNumber(state.weight),
-      weightFeedback: optionalChoice(state.weightFeedback),
-      suitType: optionalChoice(state.suitType),
-      hood: state.hood,
-      gloves: state.gloves,
-      boots: state.boots,
-      buddy: optionalText(state.buddy),
-      diveShop: optionalText(state.diveShop),
-      current: optionalChoice(state.current),
-      surge: optionalChoice(state.surge),
-      waves: optionalChoice(state.waves),
-      weather: optionalText(state.weather),
-      waterType: optionalChoice(state.waterType),
-      bodyOfWater: resolveBodyOfWater(state),
-      entryType: optionalChoice(state.entryType),
-      notes: optionalText(state.notes),
-      rating: state.rating,
-      depthProfile: profileResult?.ok ? profileResult.points : state.depthProfileRaw.trim() ? null : initialDepthProfile,
-      depthProfileRaw: optionalText(state.depthProfileRaw),
+      site: toSiteSelection(source.site),
+      title: optionalText(source.title),
+      occurredAt: new Date(source.occurredAt),
+      maxDepth: optionalNumber(source.maxDepth),
+      avgDepth: optionalNumber(source.avgDepth),
+      bottomTimeMinutes: optionalNumber(source.bottomTimeMinutes),
+      waterTemp: optionalNumber(source.waterTemp),
+      waterTempLow: optionalNumber(source.waterTempLow),
+      airTemp: optionalNumber(source.airTemp),
+      visibility: optionalNumber(source.visibility),
+      gasMix: optionalText(source.gasMix),
+      tankInfo: optionalText(source.tankInfo),
+      cylinderSize: optionalNumber(source.cylinderSize),
+      startPressure: optionalNumber(source.startPressure),
+      endPressure: optionalNumber(source.endPressure),
+      weight: optionalNumber(source.weight),
+      weightFeedback: optionalChoice(source.weightFeedback),
+      suitType: optionalChoice(source.suitType),
+      hood: source.hood,
+      gloves: source.gloves,
+      boots: source.boots,
+      buddy: optionalText(source.buddy),
+      diveShop: optionalText(source.diveShop),
+      current: optionalChoice(source.current),
+      surge: optionalChoice(source.surge),
+      waves: optionalChoice(source.waves),
+      weather: optionalText(source.weather),
+      waterType: optionalChoice(source.waterType),
+      bodyOfWater: resolveBodyOfWater(source),
+      entryType: optionalChoice(source.entryType),
+      notes: optionalText(source.notes),
+      rating: source.rating,
+      depthProfile: sourceProfileResult?.ok
+        ? sourceProfileResult.points
+        : source.depthProfileRaw.trim()
+          ? null
+          : fallbackDepthProfile,
+      depthProfileRaw: optionalText(source.depthProfileRaw),
     };
+  }
+
+  function buildInput(): DiveInput {
+    return buildInputFromState(state, initialDepthProfile);
   }
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -615,7 +700,14 @@ export function DiveForm({
     if (suuntoImportId === undefined || mergeTargetId === null) return;
     if (!validateProfile()) return;
 
-    const input = buildInput();
+    const target = suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId);
+    if (!target) return;
+
+    const mergedState = mergeStates(state, target.values, mergeChoices);
+    const input = buildInputFromState(
+      mergedState,
+      mergeChoices.depthProfileRaw === "target" ? target.values.depthProfile : initialDepthProfile,
+    );
 
     startTransition(async () => {
       const result = await mergeSuuntoDiveImportAction(suuntoImportId, mergeTargetId, input);
@@ -646,7 +738,7 @@ export function DiveForm({
           <Field id="title" label="Title" hint="Optional -- defaults to the site name and date.">
             <Input
               id="title"
-              placeholder="Night dive with the reef sharks"
+              placeholder={neutralPlaceholder("Night dive with the reef sharks")}
               value={state.title}
               onChange={(event) => set("title", event.target.value)}
             />
@@ -675,7 +767,7 @@ export function DiveForm({
             <Input
               id="maxDepth"
               inputMode="decimal"
-              placeholder="27.4"
+              placeholder={neutralPlaceholder("27.4")}
               value={state.maxDepth}
               onChange={(event) => set("maxDepth", event.target.value)}
             />
@@ -684,7 +776,7 @@ export function DiveForm({
             <Input
               id="avgDepth"
               inputMode="decimal"
-              placeholder="14.8"
+              placeholder={neutralPlaceholder("14.8")}
               value={state.avgDepth}
               onChange={(event) => set("avgDepth", event.target.value)}
             />
@@ -693,7 +785,7 @@ export function DiveForm({
             <Input
               id="bottomTimeMinutes"
               inputMode="numeric"
-              placeholder="48"
+              placeholder={neutralPlaceholder("48")}
               value={state.bottomTimeMinutes}
               onChange={(event) => set("bottomTimeMinutes", event.target.value)}
             />
@@ -702,7 +794,7 @@ export function DiveForm({
             <Input
               id="waterTemp"
               inputMode="decimal"
-              placeholder="24.5"
+              placeholder={neutralPlaceholder("24.5")}
               value={state.waterTemp}
               onChange={(event) => set("waterTemp", event.target.value)}
             />
@@ -711,7 +803,7 @@ export function DiveForm({
             <Input
               id="waterTempLow"
               inputMode="decimal"
-              placeholder="21.0"
+              placeholder={neutralPlaceholder("21.0")}
               value={state.waterTempLow}
               onChange={(event) => set("waterTempLow", event.target.value)}
             />
@@ -720,7 +812,7 @@ export function DiveForm({
             <Input
               id="visibility"
               inputMode="decimal"
-              placeholder="18"
+              placeholder={neutralPlaceholder("18")}
               value={state.visibility}
               onChange={(event) => set("visibility", event.target.value)}
             />
@@ -745,7 +837,7 @@ export function DiveForm({
             <Field id="gasMix" label="Gas mix">
               <Input
                 id="gasMix"
-                placeholder="EAN32"
+                placeholder={neutralPlaceholder("EAN32")}
                 value={state.gasMix}
                 onChange={(event) => set("gasMix", event.target.value)}
               />
@@ -753,7 +845,7 @@ export function DiveForm({
             <Field id="tankInfo" label="Cylinder">
               <Input
                 id="tankInfo"
-                placeholder="12L steel, 200 bar"
+                placeholder={neutralPlaceholder("12L steel, 200 bar")}
                 value={state.tankInfo}
                 onChange={(event) => set("tankInfo", event.target.value)}
               />
@@ -762,7 +854,7 @@ export function DiveForm({
               <Input
                 id="cylinderSize"
                 inputMode="decimal"
-                placeholder="12"
+                placeholder={neutralPlaceholder("12")}
                 value={state.cylinderSize}
                 onChange={(event) => set("cylinderSize", event.target.value)}
               />
@@ -782,7 +874,7 @@ export function DiveForm({
               <Input
                 id="startPressure"
                 inputMode="decimal"
-                placeholder="200"
+                placeholder={neutralPlaceholder("200")}
                 value={state.startPressure}
                 onChange={(event) => set("startPressure", event.target.value)}
               />
@@ -791,7 +883,7 @@ export function DiveForm({
               <Input
                 id="endPressure"
                 inputMode="decimal"
-                placeholder="50"
+                placeholder={neutralPlaceholder("50")}
                 value={state.endPressure}
                 onChange={(event) => set("endPressure", event.target.value)}
               />
@@ -800,7 +892,7 @@ export function DiveForm({
               <Input
                 id="weight"
                 inputMode="decimal"
-                placeholder="6"
+                placeholder={neutralPlaceholder("6")}
                 value={state.weight}
                 onChange={(event) => set("weight", event.target.value)}
               />
@@ -875,7 +967,7 @@ export function DiveForm({
           <Field id="weather" label="Weather">
             <Input
               id="weather"
-              placeholder="Sunny, light chop"
+              placeholder={neutralPlaceholder("Sunny, light chop")}
               value={state.weather}
               onChange={(event) => set("weather", event.target.value)}
             />
@@ -884,7 +976,7 @@ export function DiveForm({
             <Input
               id="airTemp"
               inputMode="decimal"
-              placeholder="29"
+              placeholder={neutralPlaceholder("29")}
               value={state.airTemp}
               onChange={(event) => set("airTemp", event.target.value)}
             />
@@ -909,7 +1001,7 @@ export function DiveForm({
             <Field id="bodyOfWaterOther" label="Body of water — other">
               <Input
                 id="bodyOfWaterOther"
-                placeholder="Cenote"
+                placeholder={neutralPlaceholder("Cenote")}
                 value={state.bodyOfWaterOther}
                 onChange={(event) => set("bodyOfWaterOther", event.target.value)}
               />
@@ -918,7 +1010,7 @@ export function DiveForm({
           <Field id="buddy" label="Buddy / dive guide">
             <Input
               id="buddy"
-              placeholder="Sam Okafor"
+              placeholder={neutralPlaceholder("Sam Okafor")}
               value={state.buddy}
               onChange={(event) => set("buddy", event.target.value)}
             />
@@ -926,7 +1018,7 @@ export function DiveForm({
           <Field id="diveShop" label="Dive shop / operator">
             <Input
               id="diveShop"
-              placeholder="Blue Hole Divers"
+              placeholder={neutralPlaceholder("Blue Hole Divers")}
               value={state.diveShop}
               onChange={(event) => set("diveShop", event.target.value)}
             />
@@ -944,7 +1036,7 @@ export function DiveForm({
             <Textarea
               id="notes"
               rows={4}
-              placeholder="Turtles on the shallow shelf, thermocline at 18m."
+              placeholder={neutralPlaceholder("Turtles on the shallow shelf, thermocline at 18m.")}
               value={state.notes}
               onChange={(event) => set("notes", event.target.value)}
             />
@@ -954,6 +1046,7 @@ export function DiveForm({
             value={state.depthProfileRaw}
             onChange={(next) => set("depthProfileRaw", next)}
             result={profileResult}
+            placeholder={neutralPlaceholder("Paste CSV or UDDF, e.g.\n0:00, 0\n3:00, 12.4\n18:00, 27.1")}
           />
         </CardContent>
       </Card>
@@ -989,25 +1082,70 @@ export function DiveForm({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex max-h-[24rem] flex-col gap-2 overflow-y-auto">
-            {suuntoMergeCandidates.map((candidate, index) => (
-              <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
-                <input
-                  type="radio"
-                  name="suunto-merge-target"
-                  checked={mergeTargetId === candidate.id}
-                  onChange={() => setMergeTargetId(candidate.id)}
-                  disabled={isPending}
-                />
-                <span className="flex flex-col gap-1">
-                  <span className="font-medium">
-                    {candidate.title || candidate.siteName || `Dive #${candidate.id}`}
-                    {index === 0 ? <span className="ml-2 text-xs text-muted-foreground">closest by date</span> : null}
+          <div className="flex max-h-[30rem] flex-col gap-5 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2">
+              {suuntoMergeCandidates.map((candidate, index) => (
+                <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
+                  <input
+                    type="radio"
+                    name="suunto-merge-target"
+                    checked={mergeTargetId === candidate.id}
+                    onChange={() => setMergeTargetId(candidate.id)}
+                    disabled={isPending}
+                  />
+                  <span className="flex flex-col gap-1">
+                    <span className="font-medium">
+                      {candidate.title || candidate.siteName || `Dive #${candidate.id}`}
+                      {index === 0 ? <span className="ml-2 text-xs text-muted-foreground">closest by date</span> : null}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{formatCandidate(candidate)}</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{formatCandidate(candidate)}</span>
-                </span>
-              </label>
-            ))}
+                </label>
+              ))}
+            </div>
+
+            {suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId) ? (
+              <div className="rounded-md border">
+                <div className="grid grid-cols-[8rem_1fr_1fr] border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                  <span>Property</span>
+                  <span>Reviewed Suunto import</span>
+                  <span>Existing dive</span>
+                </div>
+                {mergeFields.map((field) => {
+                  const target = suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId);
+                  if (!target) return null;
+
+                  return (
+                    <div
+                      key={field.key}
+                      className="grid grid-cols-[8rem_1fr_1fr] items-center gap-2 border-b px-3 py-2 last:border-b-0"
+                    >
+                      <span className="text-xs font-medium">{field.label}</span>
+                      <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name={`suunto-merge-${field.key}`}
+                          checked={mergeChoices[field.key] === "import"}
+                          onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "import" }))}
+                          disabled={isPending}
+                        />
+                        <span className="truncate">{formatMergeValue(state[field.key])}</span>
+                      </label>
+                      <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name={`suunto-merge-${field.key}`}
+                          checked={mergeChoices[field.key] === "target"}
+                          onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "target" }))}
+                          disabled={isPending}
+                        />
+                        <span className="truncate">{formatMergeValue(target.values[field.key])}</span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           <DialogFooter>

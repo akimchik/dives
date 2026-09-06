@@ -18,10 +18,12 @@ export function DepthProfileField({
   value,
   onChange,
   result,
+  placeholder = "Paste CSV or UDDF, e.g.\n0:00, 0\n3:00, 12.4\n18:00, 27.1",
 }: {
   value: string;
   onChange: (next: string) => void;
   result: DepthProfileParseResult | null;
+  placeholder?: string;
 }) {
   const fieldId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,7 +79,7 @@ export function DepthProfileField({
         id={fieldId}
         rows={5}
         spellCheck={false}
-        placeholder={"Paste CSV or UDDF, e.g.\n0:00, 0\n3:00, 12.4\n18:00, 27.1"}
+        placeholder={placeholder}
         className="font-mono text-xs"
         value={value}
         onChange={(event) => onChange(event.target.value)}

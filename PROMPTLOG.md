@@ -218,3 +218,7 @@ The end bar, avg depth, bottom time, gas type (air), are now working, but lat/lo
 ## 2026-09-06 18:13 CEST — Suunto Queue Navigation And Coordinates
 
 Some coords appear, but looks like they are not from the workout but from some other workout. Also Integrations page now shows: 4 staged dives are waiting for review. -- How to open them? Also when fetching from suunto 10 days, a first staged dive appear on the Review Suunto dive. If I delete it I am at the Integrations page again, same if I choose Cancel. Why next staged dive is not displayed if I choose delete?
+
+## 2026-09-06 18:56 CEST — Suunto Merge Field Selection And Edit Placeholders
+
+The merge of the suunto staged dive shows a dialog to select the target dive, but does not show the merge properties dialog: I need to select which property survives the merge. Also remove the properties' placeholders for dives in edit mode, which look like meaningful values, use nothing or -- instead.

@@ -8,7 +8,7 @@ import { DeleteSuuntoImportButton } from "@/components/delete-suunto-import-butt
 import { DiveForm } from "@/components/dive-form";
 import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
 import { Card, CardContent } from "@/components/ui/card";
-import { listSuuntoMergeDiveCandidates } from "@/lib/dives";
+import { listSuuntoMergeDiveCandidates, type SuuntoMergeDiveCandidate } from "@/lib/dives";
 import {
   getFirstPendingSuuntoImportId,
   getNextPendingSuuntoImportId,
@@ -19,6 +19,65 @@ import { requireUser } from "@/lib/session";
 export const metadata: Metadata = {
   title: "Review Suunto dive · Dives",
 };
+
+function serializeMergeCandidate(dive: SuuntoMergeDiveCandidate) {
+  const text = (value: string | null) => value ?? "";
+  const numberText = (value: string | number | null) => (value === null ? "" : String(value));
+  const choice = (value: string | null) => value ?? "__none__";
+  const bodyOfWater = dive.body_of_water ?? "__none__";
+
+  return {
+    id: dive.id,
+    title: dive.title,
+    occurredAt: dive.occurred_at.toISOString(),
+    maxDepth: dive.max_depth,
+    bottomTimeMinutes: dive.bottom_time_minutes,
+    siteName: dive.site_name,
+    values: {
+      title: text(dive.title),
+      occurredAt: dive.occurred_at.toISOString().slice(0, 16),
+      site: {
+        siteId: dive.dive_site_id,
+        name: text(dive.site_name),
+        location: text(dive.site_location),
+        lat: numberText(dive.site_lat),
+        lng: numberText(dive.site_lng),
+      },
+      maxDepth: numberText(dive.max_depth),
+      avgDepth: numberText(dive.avg_depth),
+      bottomTimeMinutes: numberText(dive.bottom_time_minutes),
+      waterTemp: numberText(dive.water_temp),
+      waterTempLow: numberText(dive.water_temp_low),
+      airTemp: numberText(dive.air_temp),
+      visibility: numberText(dive.visibility),
+      gasMix: text(dive.gas_mix),
+      tankInfo: text(dive.tank_info),
+      cylinderSize: numberText(dive.cylinder_size),
+      startPressure: numberText(dive.start_pressure),
+      endPressure: numberText(dive.end_pressure),
+      weight: numberText(dive.weight),
+      weightFeedback: choice(dive.weight_feedback),
+      suitType: choice(dive.suit_type),
+      hood: dive.hood ?? false,
+      gloves: dive.gloves ?? false,
+      boots: dive.boots ?? false,
+      buddy: text(dive.buddy),
+      diveShop: text(dive.dive_shop),
+      current: choice(dive.current),
+      surge: choice(dive.surge),
+      waves: choice(dive.waves),
+      weather: text(dive.weather),
+      waterType: choice(dive.water_type),
+      bodyOfWater,
+      bodyOfWaterOther: bodyOfWater === "__none__" ? "" : bodyOfWater,
+      entryType: choice(dive.entry_type),
+      notes: text(dive.notes),
+      rating: dive.rating,
+      depthProfileRaw: text(dive.depth_profile_raw),
+      depthProfile: dive.depth_profile,
+    },
+  };
+}
 
 export default async function ReviewSuuntoImportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -75,14 +134,7 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
             cancelImportId === null ? "/settings/integrations" : `/settings/integrations/suunto/imports/${cancelImportId}`
           }
           submitLabel="Save Suunto dive"
-          suuntoMergeCandidates={mergeCandidates.map((dive) => ({
-            id: dive.id,
-            title: dive.title,
-            occurredAt: dive.occurred_at.toISOString(),
-            maxDepth: dive.max_depth,
-            bottomTimeMinutes: dive.bottom_time_minutes,
-            siteName: dive.site_name,
-          }))}
+          suuntoMergeCandidates={mergeCandidates.map(serializeMergeCandidate)}
         />
       </div>
     </AppShell>

@@ -325,10 +325,12 @@ return to the normal destination.
 
 The Suunto review form can either save the staged import as a new dive or merge it
 into an existing user-owned dive. Merge candidates are existing dives without a
-Suunto workout id, ordered by closeness to the staged workout date. Merging uses
-the reviewed form fields, attaches the Suunto workout id/profile/original bundle
-to the selected dive, deletes the staged import, and enqueues a normal edit backup
-in one transaction.
+Suunto workout id, ordered by closeness to the staged workout date. The merge
+dialog first chooses the target dive, then mirrors the dive-site merge workflow by
+letting the user choose whether each editable field survives from the reviewed
+Suunto import or from the existing dive. Merging attaches the Suunto workout
+id/profile/original bundle to the selected dive, deletes the staged import, and
+enqueues a normal edit backup in one transaction.
 
 ## Tests
 

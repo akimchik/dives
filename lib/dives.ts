@@ -535,7 +535,7 @@ export async function listSuuntoMergeDiveCandidates(
   const preferred = preferredAt ? new Date(preferredAt) : null;
   const result = await queryRead<SuuntoMergeDiveCandidate>(
     `
-      select d.id, d.title, d.occurred_at, d.max_depth, d.bottom_time_minutes, s.name as site_name
+      select ${snapshotColumns}, d.dive_site_id
       ${diveFrom}
       where d.user_id = $1
         and d.suunto_workout_key is null
@@ -557,14 +557,7 @@ export type RecentCylinder = {
   cylinderSize: string | null;
 };
 
-export type SuuntoMergeDiveCandidate = {
-  id: number;
-  title: string | null;
-  occurred_at: Date;
-  max_depth: string | null;
-  bottom_time_minutes: number | null;
-  site_name: string | null;
-};
+export type SuuntoMergeDiveCandidate = DiveRecord;
 
 // The form's optional "recent cylinder" picker: the user's last 5 distinct (tank_info,
 // cylinder_size) combinations, ordered by the most recent dive that used each one -- not by

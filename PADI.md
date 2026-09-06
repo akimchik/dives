@@ -1,6 +1,6 @@
 # PADI logbook sync
 
-A user connects their PADI dive-certification account, and a "Sync PADI" button on the Dashboard
+A user connects their PADI dive-certification account, and a "Fetch PADI" button on the Dashboard
 imports their PADI logbook into this app's own `dives` table. Write-back support is intentionally
 local-to-PADI only: unlinked local dives can be created in PADI, and linked recreational dives that
 differ from the latest sync can be updated back to PADI. Course/training dives are read-only here.
@@ -46,7 +46,7 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
    `needs_reconnect_at`, not `connected_at`), so a user who disconnects, reconnects, and disconnects
    again is notified every time, not just the first.
 5. **Sync** (`app/actions/padi.ts`'s `syncPadiAction` → `lib/padi/sync.ts`'s `syncPadiLogbook`,
-   triggered by the Dashboard's "Sync PADI" button): decrypts the stored `idToken`, decodes the
+   triggered by the Dashboard's "Fetch PADI" button): decrypts the stored `idToken`, decodes the
    PADI affiliate id from that same token's `custom:affiliate_id` claim, and walks PADI's paginated
    logbook GraphQL endpoint end to end, importing every not-yet-seen dive. For already-linked dives
    it fetches detail records and compares PADI's current values with the local row. Linked
@@ -68,7 +68,7 @@ server-to-server credential POST, and this app relays the user's PADI login/pass
    `UpdateRecreationalDiveLog` mutation from `scratch`, updating the top-level log row plus the
    one-row `depth_times`, `conditions`, `equipment`, and `experiences` sections. A successful update
    clears `padi_needs_update`; updating in the opposite direction is deliberately manual: delete the
-   local linked dive and run Sync PADI again.
+   local linked dive and run Fetch PADI again.
 
 **Rate limiting**: a failed connect attempt is rate-limited on two dimensions
 (`lib/padi/rate-limit.ts`): the calling app user (5 failed attempts / rolling hour — the user-facing

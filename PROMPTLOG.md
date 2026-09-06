@@ -222,3 +222,7 @@ Some coords appear, but looks like they are not from the workout but from some o
 ## 2026-09-06 18:56 CEST — Suunto Merge Field Selection And Edit Placeholders
 
 The merge of the suunto staged dive shows a dialog to select the target dive, but does not show the merge properties dialog: I need to select which property survives the merge. Also remove the properties' placeholders for dives in edit mode, which look like meaningful values, use nothing or -- instead.
+
+## 2026-09-06 19:31 CEST — Dashboard Fetch Buttons
+
+Rename "Sync PADI" to "Fetch PADI" and add "Fetch Suunto" buttons to Dashboard

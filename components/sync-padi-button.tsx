@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export type PadiSyncStatus = "not_connected" | "needs_reconnect" | "connected";
 
 // app/dashboard/page.tsx is an async server component and can't itself hold pending/transition
-// state, so the interactive "Sync PADI" control lives here as its own client component, mirroring
+// state, so the interactive "Fetch PADI" control lives here as its own client component, mirroring
 // how the dive-add flow's own interactive bits are split out.
 export function SyncPadiButton({ status }: { status: PadiSyncStatus }) {
   const router = useRouter();
@@ -41,7 +41,7 @@ export function SyncPadiButton({ status }: { status: PadiSyncStatus }) {
       }
 
       if (result.remaining) {
-        toast.success(`Imported ${result.imported} so far — click Sync again to continue.`);
+        toast.success(`Imported ${result.imported} so far — click Fetch PADI again to continue.`);
       } else if (result.imported > 0) {
         toast.success(
           `Imported ${result.imported} new dive${result.imported === 1 ? "" : "s"}.` +
@@ -64,7 +64,7 @@ export function SyncPadiButton({ status }: { status: PadiSyncStatus }) {
   return (
     <Button type="button" variant="outline" disabled={isPending} onClick={handleSync}>
       {isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-      Sync PADI
+      Fetch PADI
     </Button>
   );
 }

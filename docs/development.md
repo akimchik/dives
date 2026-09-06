@@ -117,7 +117,7 @@ same dive produce two outbox rows instead of collapsing into one.
 
 | Route | What it renders |
 | --- | --- |
-| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
 | `/dives` | The whole logbook, newest first |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
 | `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, and an update-to-PADI action for linked recreational dives marked out-of-sync |
@@ -266,7 +266,7 @@ stored), encrypts the returned tokens (`scripts/padi/crypto.mjs`,
 `PADI_TOKEN_ENCRYPTION_KEY`), and a `padi-token-refresh` CronJob
 (`padiTokenRefresh.schedule`, default `*/30 * * * *`) keeps the access token
 fresh via `scripts/padi/token-refresh.mjs`; malformed 2xx refresh bodies are
-classified instead of being allowed to crash the CronJob. A "Sync PADI" button
+classified instead of being allowed to crash the CronJob. A "Fetch PADI" button
 (`syncPadiAction` → `lib/padi/sync.ts`) imports the user's full logbook into
 `dives`, deduped by `padi_dive_id`, and compares already-linked details so
 linked recreational dives whose local fields differ are flagged with

@@ -95,11 +95,36 @@ notifications:
 padiTokenRefresh:
   schedule: "*/30 * * * *"
 
+suuntoSidecar:
+  # Disabled by default so stages without a suuntool-capable image still deploy.
+  # When enabled, the app talks to this sidecar over 127.0.0.1 only.
+  enabled: false
+  port: 4817
+  image:
+    repository: registry.pumpking.aleksandr.vin/dives/web
+    pullPolicy: Always
+    tag: amnesiac
+  suuntoolBin: "suuntool"
+  timeoutMs: "60000"
+  exportTimeoutMs: "180000"
+  maxRequestBytes: "1000000"
+  maxBundleBytes: "25000000"
+  maxBundleFiles: "20"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
 appSecrets:
   email_host_password: "replace-with-email-host-password"
   DIVES_ADMIN_PASSWORD: "replace-with-admin-password"
   PADI_TOKEN_ENCRYPTION_KEY: "replace-with-padi-token-encryption-key"
   PADI_USERNAME_HASH_PEPPER: "replace-with-padi-username-hash-pepper"
+  SUUNTO_SESSION_ENCRYPTION_KEY: "replace-with-suunto-session-encryption-key"
+  SUUNTO_EMAIL_HASH_PEPPER: "replace-with-suunto-email-hash-pepper"
 
 resources:
   requests:

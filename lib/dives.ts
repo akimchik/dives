@@ -110,6 +110,10 @@ export type DiveSnapshot = {
   padi_status: string | null;
   padi_needs_update: boolean;
   padi_last_compared_at: Date | null;
+  // Suunto provenance/profile is safe to expose to the app UI for charts and duplicate hints.
+  // The original bundle blob is intentionally not part of snapshots/backups/DTOs.
+  suunto_workout_key: string | null;
+  suunto_profile: unknown;
   site_name: string | null;
   site_location: string | null;
   site_lat: number | null;
@@ -215,6 +219,8 @@ const snapshotColumns = `
   d.padi_status,
   d.padi_needs_update,
   d.padi_last_compared_at,
+  d.suunto_workout_key,
+  d.suunto_profile,
   s.name as site_name,
   s.location as site_location,
   s.lat as site_lat,
@@ -843,6 +849,90 @@ export async function createDiveFromPadi(
     }
 
     return { inserted: true, id: inserted.rows[0].id };
+  });
+}
+
+export type CreateDiveFromSuuntoImportResult =
+  | { inserted: false; reason: "missing_import" | "already_saved" }
+  | { inserted: true; dive: DiveSnapshot };
+
+// Human-reviewed save path for staged Suunto imports. It is deliberately separate from
+// createDive()/updateDive(): Suunto provenance/profile/bundle columns are write-once here and never
+// touched by ordinary manual edits, preserving the source identity needed for exact workout-key
+// dedupe and later PADI upload eligibility. The staged row is deleted in the same transaction as the
+// dive insert, so a consumed queue item cannot reappear after a successful save.
+export async function createDiveFromSuuntoImport(
+  owner: DiveOwner,
+  suuntoImportId: number,
+  input: DiveInput,
+): Promise<CreateDiveFromSuuntoImportResult> {
+  return inTransaction(async (client) => {
+    const source = await client.query<{
+      workout_key: string;
+      compiled_profile: unknown;
+      original_bundle: Buffer;
+    }>(
+      `
+        select workout_key, compiled_profile, original_bundle
+        from suunto_imports
+        where id = $1
+          and user_id = $2
+        for update
+      `,
+      [suuntoImportId, owner.id],
+    );
+
+    const row = source.rows[0];
+    if (!row) {
+      return { inserted: false, reason: "missing_import" };
+    }
+
+    const diveSiteId = await resolveDiveSiteId(client, owner.id, input.site);
+
+    const inserted = await client.query<{ id: number }>(
+      `
+        insert into dives (
+          user_id, dive_site_id, title, occurred_at, max_depth, avg_depth, bottom_time_minutes,
+          water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
+          start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
+          buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
+          entry_type, notes, rating, depth_profile, depth_profile_raw,
+          suunto_workout_key, suunto_profile, suunto_original_bundle
+        )
+        values (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
+          $36, $37::jsonb, $38
+        )
+        on conflict (user_id, suunto_workout_key) where suunto_workout_key is not null do nothing
+        returning id
+      `,
+      [
+        owner.id,
+        ...diveValues(diveSiteId, input),
+        row.workout_key,
+        JSON.stringify(row.compiled_profile),
+        row.original_bundle,
+      ],
+    );
+
+    if (inserted.rows.length === 0) {
+      await client.query("delete from suunto_imports where id = $1 and user_id = $2", [
+        suuntoImportId,
+        owner.id,
+      ]);
+      return { inserted: false, reason: "already_saved" };
+    }
+
+    await client.query("delete from suunto_imports where id = $1 and user_id = $2", [
+      suuntoImportId,
+      owner.id,
+    ]);
+
+    const snapshot = await loadSnapshot(client, owner.id, inserted.rows[0].id);
+    await enqueueDiveBackup(client, owner, "create", snapshot);
+
+    return { inserted: true, dive: snapshot };
   });
 }
 

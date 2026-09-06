@@ -8,6 +8,7 @@ import { CreatePadiDiveButton } from "@/components/create-padi-dive-button";
 import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
 import { DiveSiteMap } from "@/components/dive-site-map-lazy";
+import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
 import { UpdatePadiDiveButton } from "@/components/update-padi-dive-button";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +23,7 @@ import { getDive } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
+import { isSuuntoDiveProfile } from "@/lib/suunto/profile";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -97,6 +99,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
   // The JSONB column is `unknown` to TypeScript and nothing stops a hand-edited row, so it is
   // narrowed with the parser's own guard rather than cast.
   const profile = isDepthProfile(dive.depth_profile) ? dive.depth_profile : null;
+  const suuntoProfile = isSuuntoDiveProfile(dive.suunto_profile) ? dive.suunto_profile : null;
   const canUpdatePadi =
     dive.padi_needs_update &&
     dive.padi_dive_id !== null &&
@@ -185,6 +188,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
         <DetailGroup
           title="Profile"
           entries={[
+            ["Suunto workout id", dive.suunto_workout_key],
             ["Max depth", formatMeasurement(dive.max_depth, " m")],
             ["Average depth", formatMeasurement(dive.avg_depth, " m")],
             ["Bottom time", formatMinutes(dive.bottom_time_minutes)],
@@ -245,7 +249,16 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           </Card>
         ) : null}
 
-        {profile ? (
+        {suuntoProfile ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Suunto profile</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SuuntoProfileChart profile={suuntoProfile} />
+            </CardContent>
+          </Card>
+        ) : profile ? (
           <Card>
             <CardHeader>
               <CardTitle>Depth profile</CardTitle>

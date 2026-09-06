@@ -6,6 +6,7 @@ import { Loader2, Save, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { createDiveAction, recentCylindersAction, updateDiveAction } from "@/app/actions/dives";
+import { createSuuntoDiveImportAction } from "@/app/actions/suunto";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DepthProfileField } from "@/components/depth-profile-field";
 import {
@@ -180,6 +181,52 @@ function stateFromDive(dive: DiveRecord): FormState {
     notes: text(dive.notes),
     rating: dive.rating,
     depthProfileRaw: text(dive.depth_profile_raw),
+  };
+}
+
+function stateFromDraft(draft: Partial<DiveInput>): FormState {
+  const state = blankState();
+
+  return {
+    ...state,
+    title: draft.title ?? state.title,
+    occurredAt: draft.occurredAt ? toDateTimeLocalValue(new Date(draft.occurredAt)) : state.occurredAt,
+    maxDepth: draft.maxDepth === null || draft.maxDepth === undefined ? "" : String(draft.maxDepth),
+    avgDepth: draft.avgDepth === null || draft.avgDepth === undefined ? "" : String(draft.avgDepth),
+    bottomTimeMinutes:
+      draft.bottomTimeMinutes === null || draft.bottomTimeMinutes === undefined
+        ? ""
+        : String(draft.bottomTimeMinutes),
+    waterTemp: draft.waterTemp === null || draft.waterTemp === undefined ? "" : String(draft.waterTemp),
+    waterTempLow:
+      draft.waterTempLow === null || draft.waterTempLow === undefined ? "" : String(draft.waterTempLow),
+    airTemp: draft.airTemp === null || draft.airTemp === undefined ? "" : String(draft.airTemp),
+    visibility: draft.visibility === null || draft.visibility === undefined ? "" : String(draft.visibility),
+    gasMix: draft.gasMix ?? "",
+    tankInfo: draft.tankInfo ?? "",
+    cylinderSize:
+      draft.cylinderSize === null || draft.cylinderSize === undefined ? "" : String(draft.cylinderSize),
+    startPressure:
+      draft.startPressure === null || draft.startPressure === undefined ? "" : String(draft.startPressure),
+    endPressure: draft.endPressure === null || draft.endPressure === undefined ? "" : String(draft.endPressure),
+    weight: draft.weight === null || draft.weight === undefined ? "" : String(draft.weight),
+    weightFeedback: draft.weightFeedback ?? state.weightFeedback,
+    suitType: draft.suitType ?? state.suitType,
+    hood: draft.hood ?? state.hood,
+    gloves: draft.gloves ?? state.gloves,
+    boots: draft.boots ?? state.boots,
+    buddy: draft.buddy ?? "",
+    diveShop: draft.diveShop ?? "",
+    current: draft.current ?? state.current,
+    surge: draft.surge ?? state.surge,
+    waves: draft.waves ?? state.waves,
+    weather: draft.weather ?? "",
+    waterType: draft.waterType ?? state.waterType,
+    bodyOfWater: draft.bodyOfWater ?? state.bodyOfWater,
+    entryType: draft.entryType ?? state.entryType,
+    notes: draft.notes ?? "",
+    rating: draft.rating ?? state.rating,
+    depthProfileRaw: draft.depthProfileRaw ?? "",
   };
 }
 
@@ -386,9 +433,24 @@ function CheckField({
   );
 }
 
-export function DiveForm({ dive }: { dive?: DiveRecord }) {
+export function DiveForm({
+  dive,
+  draftDive,
+  suuntoImportId,
+  cancelHref,
+  submitLabel,
+}: {
+  dive?: DiveRecord;
+  draftDive?: Partial<DiveInput>;
+  suuntoImportId?: number;
+  cancelHref?: string;
+  submitLabel?: string;
+}) {
   const router = useRouter();
-  const [state, setState] = useState<FormState>(() => (dive ? stateFromDive(dive) : blankState()));
+  const initialDepthProfile = dive?.depth_profile ?? draftDive?.depthProfile ?? null;
+  const [state, setState] = useState<FormState>(() =>
+    dive ? stateFromDive(dive) : draftDive ? stateFromDraft(draftDive) : blankState(),
+  );
   const [isPending, startTransition] = useTransition();
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -462,27 +524,34 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
       entryType: optionalChoice(state.entryType),
       notes: optionalText(state.notes),
       rating: state.rating,
-      depthProfile: profileResult?.ok ? profileResult.points : null,
+      depthProfile: profileResult?.ok ? profileResult.points : state.depthProfileRaw.trim() ? null : initialDepthProfile,
       depthProfileRaw: optionalText(state.depthProfileRaw),
     };
 
     startTransition(async () => {
-      const result = dive
-        ? await updateDiveAction(dive.id, input)
-        : await createDiveAction(input);
+      const result =
+        suuntoImportId !== undefined
+          ? await createSuuntoDiveImportAction(suuntoImportId, input)
+          : dive
+            ? await updateDiveAction(dive.id, input)
+            : await createDiveAction(input);
 
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
 
-      toast.success(dive ? "Dive updated." : "Dive logged.");
+      toast.success(suuntoImportId !== undefined ? "Suunto dive saved." : dive ? "Dive updated." : "Dive logged.");
       // refresh() must come BEFORE push(): it invalidates the client Router Cache, so the
       // navigation that follows is forced to fetch fresh data instead of serving a snapshot of
       // this route already cached from earlier in the session (push-then-refresh raced on this --
       // push could resolve from the stale cache before refresh got a chance to invalidate it).
       router.refresh();
-      router.push(`/dives/${result.id}`);
+      if (suuntoImportId !== undefined && "nextImportId" in result && result.nextImportId !== null) {
+        router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
+      } else {
+        router.push(`/dives/${result.id}`);
+      }
     });
   }
 
@@ -811,13 +880,13 @@ export function DiveForm({ dive }: { dive?: DiveRecord }) {
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={!canSubmit}>
           {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-          {dive ? "Save changes" : "Log dive"}
+          {submitLabel ?? (dive ? "Save changes" : "Log dive")}
         </Button>
         <Button
           type="button"
           variant="ghost"
           disabled={isPending}
-          onClick={() => router.push(dive ? `/dives/${dive.id}` : "/dives")}
+          onClick={() => router.push(cancelHref ?? (dive ? `/dives/${dive.id}` : "/dives"))}
         >
           Cancel
         </Button>

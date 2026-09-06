@@ -46,6 +46,7 @@ this repo.
 | `pnpm lint` / `pnpm lint:unused` | ESLint / knip |
 | `pnpm db:migrate` | Apply `migrations/*.sql` |
 | `pnpm notifications:process` | Drain the notification queue once |
+| `pnpm suunto:sidecar` | Run the local pod-style suuntool sidecar wrapper |
 
 This repo was scaffolded from the upstream 21daylabs Next.js template; see
 "Project identity" in `AGENTS.md` for what was and wasn't carried over.

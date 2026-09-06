@@ -5,8 +5,11 @@ import { ChevronLeft } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { PadiConnectForm } from "@/components/padi-connect-form";
+import { SuuntoConnectForm } from "@/components/suunto-connect-form";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
+import { getSuuntoIntegrationStatus } from "@/lib/suunto/integrations";
+import { countPendingSuuntoImports } from "@/lib/suunto/imports";
 
 export const metadata: Metadata = {
   title: "Integrations · Dives",
@@ -14,7 +17,11 @@ export const metadata: Metadata = {
 
 export default async function IntegrationsPage() {
   const user = await requireUser("/settings/integrations");
-  const status = await getPadiIntegrationStatus(user.id);
+  const [padiStatus, suuntoStatus, pendingSuuntoImports] = await Promise.all([
+    getPadiIntegrationStatus(user.id),
+    getSuuntoIntegrationStatus(user.id),
+    countPendingSuuntoImports(user.id),
+  ]);
 
   return (
     <AppShell email={user.email}>
@@ -35,13 +42,36 @@ export default async function IntegrationsPage() {
             <h2 className="text-sm font-medium">PADI</h2>
             <PadiConnectForm
               status={
-                status ? { status: status.status, connectedAt: status.connectedAt.toISOString() } : null
+                padiStatus ? { status: padiStatus.status, connectedAt: padiStatus.connectedAt.toISOString() } : null
               }
             />
             <p className="text-xs text-muted-foreground">
               PADI sync imports new remote dives and flags linked recreational dives whose local
               copy differs from PADI. To replace a local linked dive with PADI’s version, delete the
               local dive and run Sync PADI again.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex flex-col gap-4 px-4">
+            <h2 className="text-sm font-medium">Suunto</h2>
+            <SuuntoConnectForm
+              status={
+                suuntoStatus
+                  ? {
+                      status: suuntoStatus.status,
+                      connectedAt: suuntoStatus.connectedAt.toISOString(),
+                      lastFetchAt: suuntoStatus.lastFetchAt?.toISOString() ?? null,
+                    }
+                  : null
+              }
+              pendingCount={pendingSuuntoImports}
+            />
+            <p className="text-xs text-muted-foreground">
+              Suunto fetch checks the latest workouts you choose, stages only dive workouts for
+              review, and ignores workouts already staged or saved. To reimport a Suunto workout,
+              delete the staged import or saved dive first, then fetch again.
             </p>
           </CardContent>
         </Card>

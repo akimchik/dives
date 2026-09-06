@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 // dive_backup notification each mutation enqueues inside its own transaction. Rows are keyed by a
 // fresh random user per case, so this file is safe to run alongside the other integration files.
 import { closeTestPool, getTestPool } from "./helpers/pg";
+import type { SuuntoDiveProfile } from "@/lib/suunto/profile";
 // Type-only: the 8 PADI-only columns createDiveFromPadi writes (v2 data-loss-bug fix -- see
 // lib/dives.ts's comment on that function and DiveInput/diveValues()/updateDive).
 import type { PadiOnlyFields } from "@/lib/padi/field-map";
@@ -22,6 +23,7 @@ import { orderedDiveColumns, renderDiveBackupEmail } from "../../scripts/notific
 const {
   createDive,
   createDiveFromPadi,
+  createDiveFromSuuntoImport,
   deleteDive,
   findOrCreateDiveSite,
   getDive,
@@ -37,6 +39,12 @@ const {
   DiveNotFoundError,
   DiveSiteNotFoundError,
 } = await import("@/lib/dives");
+const {
+  deleteSuuntoImport,
+  getPendingSuuntoImport,
+  getSuuntoDuplicateStatuses,
+  stageSuuntoImport,
+} = await import("@/lib/suunto/imports");
 
 type Owner = { id: string; email: string };
 
@@ -387,6 +395,151 @@ describe("createDiveFromPadi (PADI logbook bulk-import write path)", () => {
     // The first ordinary edit, via the untouched updateDive path, still enqueues a normal backup.
     await updateDive(owner, created.id, diveInput({ notes: "first manual edit" }));
     expect(await backupCount()).toBe(1);
+  });
+});
+
+function suuntoProfile(workoutKey: string): SuuntoDiveProfile {
+  return {
+    source: "suunto",
+    version: 1,
+    workoutKey,
+    startedAt: "2026-08-30T08:40:08.250Z",
+    durationMinutes: 53.6,
+    maxDepth: 8.82,
+    averageDepth: 4.2,
+    waterTemperature: 19.9,
+    waterTemperatureLow: 19,
+    tankStartPressure: 184.6,
+    tankEndPressure: 94.1,
+    tankSizeLitres: 14,
+    gasMix: "Air 21% O₂",
+    points: [
+      {
+        time: 0,
+        timestamp: "2026-08-30T08:40:08.250Z",
+        depth: 1.42,
+        temperature: null,
+        tankPressure: 184.6,
+        gasConsumption: 0,
+      },
+      {
+        time: 1,
+        timestamp: "2026-08-30T08:41:08.250Z",
+        depth: 8.82,
+        temperature: 19.9,
+        tankPressure: 170,
+        gasConsumption: 14.6,
+      },
+    ],
+    depthProfile: [
+      { time: 0, depth: 1.42 },
+      { time: 1, depth: 8.82 },
+    ],
+    summary: { DiveHeader: { Gases: [{ Oxygen: 21 }] } },
+  };
+}
+
+async function stageSuunto(owner: Owner, workoutKey = `suunto-${randomUUID()}`) {
+  const profile = suuntoProfile(workoutKey);
+  const result = await stageSuuntoImport(owner.id, {
+    workoutKey,
+    workoutStartedAt: profile.startedAt,
+    summary: { key: workoutKey },
+    draftDive: {
+      title: "Suunto draft",
+      occurredAt: profile.startedAt ?? undefined,
+      maxDepth: profile.maxDepth,
+      depthProfile: profile.depthProfile,
+    },
+    compiledProfile: profile,
+    originalBundle: Buffer.from(`bundle:${workoutKey}`),
+  });
+  if (!result.staged) throw new Error(`expected staged import, got ${result.reason}`);
+  return { id: result.id, profile, workoutKey };
+}
+
+describe("createDiveFromSuuntoImport (human-reviewed staged import path)", () => {
+  it("saves Suunto provenance/profile/bundle, removes the staged row, and keeps the dive PADI-eligible", async () => {
+    const owner = await createOwner();
+    const staged = await stageSuunto(owner);
+
+    const result = await createDiveFromSuuntoImport(owner, staged.id, diveInput({ title: "Reviewed Suunto dive" }));
+    expect(result.inserted).toBe(true);
+    if (!result.inserted) throw new Error("expected insert");
+
+    const stored = await getDive(owner.id, result.dive.id);
+    expect(stored?.title).toBe("Reviewed Suunto dive");
+    expect(stored?.suunto_workout_key).toBe(staged.workoutKey);
+    expect(stored?.suunto_profile).toMatchObject({ source: "suunto", workoutKey: staged.workoutKey });
+    expect(stored?.padi_dive_id).toBeNull();
+
+    const raw = await getTestPool().query<{ bundle: Buffer }>(
+      "select suunto_original_bundle as bundle from dives where id = $1 and user_id = $2",
+      [result.dive.id, owner.id],
+    );
+    expect(raw.rows[0].bundle.toString("utf8")).toBe(`bundle:${staged.workoutKey}`);
+    expect(await getPendingSuuntoImport(owner.id, staged.id)).toBeNull();
+
+    const duplicates = await getSuuntoDuplicateStatuses(owner.id, [staged.workoutKey]);
+    expect(duplicates.get(staged.workoutKey)).toBe("already_saved");
+  });
+
+  it("scopes staged imports by user for reads, deletes and duplicate checks", async () => {
+    const alice = await createOwner();
+    const bob = await createOwner();
+    const key = `shared-${randomUUID()}`;
+    const aliceImport = await stageSuunto(alice, key);
+    const bobImport = await stageSuunto(bob, key);
+
+    expect(await getPendingSuuntoImport(bob.id, aliceImport.id)).toBeNull();
+    expect(await deleteSuuntoImport(bob.id, aliceImport.id)).toBe(false);
+    expect(await getPendingSuuntoImport(alice.id, aliceImport.id)).toMatchObject({ id: aliceImport.id });
+    expect(await getPendingSuuntoImport(bob.id, bobImport.id)).toMatchObject({ id: bobImport.id });
+
+    const aliceDuplicates = await getSuuntoDuplicateStatuses(alice.id, [key]);
+    const bobDuplicates = await getSuuntoDuplicateStatuses(bob.id, [key]);
+    expect(aliceDuplicates.get(key)).toBe("already_staged");
+    expect(bobDuplicates.get(key)).toBe("already_staged");
+  });
+
+  it("detects staged/saved duplicates and clears a stale staged row after a save conflict", async () => {
+    const owner = await createOwner();
+    const key = `duplicate-${randomUUID()}`;
+    const staged = await stageSuunto(owner, key);
+    const secondStage = await stageSuuntoImport(owner.id, {
+      workoutKey: key,
+      workoutStartedAt: staged.profile.startedAt,
+      summary: {},
+      draftDive: {},
+      compiledProfile: staged.profile,
+      originalBundle: Buffer.from("again"),
+    });
+    expect(secondStage).toEqual({ staged: false, reason: "already_staged" });
+
+    await getTestPool().query(
+      "insert into dives (user_id, title, occurred_at, suunto_workout_key) values ($1, 'existing', now(), $2)",
+      [owner.id, key],
+    );
+    const conflicted = await createDiveFromSuuntoImport(owner, staged.id, diveInput());
+    expect(conflicted).toEqual({ inserted: false, reason: "already_saved" });
+    expect(await getPendingSuuntoImport(owner.id, staged.id)).toBeNull();
+  });
+
+  it("excludes original Suunto bundles from backup payloads while preserving a compact profile summary", async () => {
+    const owner = await createOwner();
+    const staged = await stageSuunto(owner);
+    const result = await createDiveFromSuuntoImport(owner, staged.id, diveInput({ title: "Backed up Suunto dive" }));
+    expect(result.inserted).toBe(true);
+    if (!result.inserted) throw new Error("expected insert");
+
+    const [row] = await backupRows(result.dive.id, "create");
+    expect(row.payload.dive.suunto_original_bundle).toBeUndefined();
+    expect(row.payload.dive.suunto_workout_key).toBe(staged.workoutKey);
+    expect(row.payload.dive.suunto_profile).toMatchObject({ source: "suunto", workoutKey: staged.workoutKey });
+
+    const email = renderDiveBackupEmail(row.payload);
+    expect(email.text).toContain("Suunto workout id:");
+    expect(email.text).toContain("Suunto profile:");
   });
 });
 

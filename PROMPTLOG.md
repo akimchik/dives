@@ -122,3 +122,71 @@ User reported PADI API create failing with `invalid input value for enum visibil
 ## 2026-09-05 17:18 Implement PADI log updates
 
 User requested implementing PADI log updates using the scratch example update call: mark local dives that differ from what PADI Sync fetches, show an "Update to PADI" button, show a hint on the Integrations page that opposite update from PADI requires deleting the local dive and resyncing, and only update recreational dives (not PADI training dives).
+
+## 2026-09-05 21:23 CEST - Deep interview Suunto integration
+
+$deep-interview Let's integrate with Suunto (via suuntool running in a sidecar pod): only fetching should be done, triggered by user via a UI button. Dialog should ask for how many last workouts to be checked. And should export via `suuntool workouts export 6tv4q2ak4ksqlrth --bundle suuntoexp` and parse workout.sml.json file to compile a dive profile chart (depths, tank pressure, etc.), store it in db as blob, (also store original bundle as blob in database). That compiled dive profile should be sent to UI as-is (json) for displaying it on UI as a chart, showing depth profile, temperature, tank pressure and gas consumption. Integration with suunto should ask for email and password for suunto app, and suuntool should use them to authenticate and not store password.
+
+## 2026-09-05 21:25 CEST - Deep interview answer Suunto staging
+
+3
+
+## 2026-09-05 21:26 CEST - Deep interview answer Suunto non-goals
+
+all of that is out of scope
+
+## 2026-09-05 21:27 CEST - Deep interview answer Suunto auth boundary other
+
+4
+
+## 2026-09-05 21:28 CEST - Deep interview answer Suunto session persistence
+
+suuntool login uses email + password to authenticate and obtains the session key, that session key should be persistet in db and reused next time user asks for fetching.
+
+## 2026-09-05 21:29 CEST - Deep interview answer Suunto staged review UI
+
+It should look like a new dive edit page, user will review/edit props and then save it. That dive should remember that it was originated from suunto workout id and it should also become eligable to PADI upload. If there are multiple dives fetched from suunto for the specified timerange, they should be one-by-one edited and saved (show the total amount of fetched dives still in the edit queue -- on the top of the page)
+
+## 2026-09-05 21:30 CEST - Deep interview answer Suunto duplicate handling
+
+They should be ignored, if user wants to reimport them -- he needs to delete them, same concept as with PADI sync -- put that hint into the Integration page too.
+
+## 2026-09-05 21:31 CEST - Ralplan Suunto integration
+
+$ralplan .omx/specs/deep-interview-suunto-integration.md
+
+## 2026-09-05 21:58 CEST - Ultragoal Suunto integration
+
+$ultragoal .omx/plans/prd-suunto-integration.md
+
+## 2026-09-05 22:20 CEST - Session context replay for Suunto ultragoal
+
+User provided the repository AGENTS.md instructions, environment context for `/Users/aleksandrvin/Developer/sev/dives`, and the active `$ultragoal .omx/plans/prd-suunto-integration.md` continuation context.
+
+## 2026-09-06 00:00 CEST - Final review notifications for Suunto ultragoal
+
+Subagent notifications reported architect BLOCK on missing suuntool runtime/health proof and code-reviewer REQUEST CHANGES on Suunto fetch error handling, credential throttling, preflight config validation, sidecar size caps, precise staged-import lookup, and generated pnpm store hygiene.
+
+## 2026-09-06 00:11 CEST - Continue Suunto verification
+
+continue
+
+## 2026-09-06 10:28 CEST — Subagent Architecture Notification
+
+User provided subagent notification: architecture gate CLEAR with residual Suunto staged-import risks.
+
+## 2026-09-06 10:29 CEST — Subagent Code Review Notification
+
+User provided subagent notification: code review REQUEST CHANGES for Suunto parser fixture shape, next-import redirect, pre-export dedupe, missing targeted coverage, and untracked personal suuntoexp data.
+
+## 2026-09-06 10:52 CEST — Final Architecture Notification
+
+User provided subagent notification: final architecture re-gate CLEAR with residual non-blocking Suunto sidecar/schema/key-stability risks.
+
+## 2026-09-06 10:53 CEST — Final Code Review Notification
+
+User provided subagent notification: final code-review re-gate APPROVE with no blocking findings and one residual non-blocking sidecar response validation risk.
+
+## 2026-09-06 11:03 CEST — Commit Suunto Integration
+
+User asked to commit the completed Suunto staged import integration.

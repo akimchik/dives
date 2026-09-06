@@ -23,6 +23,10 @@ RUN pnpm install --frozen-lockfile; \
   fi; \
   exit "$status"
 
+FROM golang:1.26-bookworm AS suuntool-builder
+ARG SUUNTOOL_VERSION=v0.8.0
+RUN GOBIN=/out go install github.com/tajchert/suuntool@${SUUNTOOL_VERSION}
+
 FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
@@ -43,6 +47,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/migrations ./migrations
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=suuntool-builder /out/suuntool /usr/local/bin/suuntool
 
 USER nextjs
 

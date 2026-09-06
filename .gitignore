@@ -23,5 +23,7 @@ dev-values.yaml
 TODO.md
 scratch
 padi-log-backup*.json
+suuntoexp/
 
 .omx/
+.pnpm-store/

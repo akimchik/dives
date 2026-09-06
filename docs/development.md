@@ -276,6 +276,37 @@ Requires `PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see
 `.env.example`); both are read lazily, so an unconfigured checkout still boots
 and serves every non-PADI page/test normally.
 
+
+## Suunto staged imports
+
+Suunto integration is fetch-only and user-triggered. The Next app talks only to a
+pod-local, stateless suuntool sidecar (`scripts/suunto-sidecar/server.mjs`) over
+`http://127.0.0.1:<port>`; there is no Service, Ingress, PVC, background sync, or
+Suunto write-back path. The sidecar runs fixed `suuntool` commands, passes the
+Suunto password to `suuntool login --password-stdin`, writes any supplied session
+to a temporary `SUUNTOOL_SESSION_FILE`, and deletes that temp directory after the
+request.
+
+The app owns persistence. `suunto_integrations` stores only a hashed email and an
+encrypted suuntool session JSON (`SUUNTO_SESSION_ENCRYPTION_KEY`, falling back to
+`PADI_TOKEN_ENCRYPTION_KEY` for local compatibility); it never stores the user's
+Suunto password. `suunto_imports` stores staged workout imports per user until the
+user reviews them. Saved dives carry `suunto_workout_key` plus the compiled
+`suunto_profile` JSON used by charts; the original exported bundle is retained in
+`suunto_original_bundle` but is deliberately not selected into ordinary dive
+snapshots/backups/UI DTOs.
+
+Duplicate handling mirrors PADI sync semantics: a Suunto workout key already
+saved to `dives` or already staged in `suunto_imports` is ignored. To re-import a
+workout, the user must delete the saved/staged copy first. A reviewed staged item
+is consumed in the same transaction that creates the dive, and the resulting dive
+is a normal local dive eligible for PADI upload.
+
+`lib/suunto/profile.ts` compiles `workout.sml.json` into a versioned JSON profile
+with depth, temperature, tank pressure and gas-consumption points, while also
+producing the simple `{ time, depth }[]` `depth_profile` used by the existing
+chart/form code.
+
 ## Tests
 
 ```sh

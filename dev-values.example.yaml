@@ -17,9 +17,17 @@ appSecrets:
   DIVES_ADMIN_PASSWORD: "replace-with-admin-password"
   PADI_TOKEN_ENCRYPTION_KEY: "replace-with-padi-token-encryption-key"
   PADI_USERNAME_HASH_PEPPER: "replace-with-padi-username-hash-pepper"
+  SUUNTO_SESSION_ENCRYPTION_KEY: "replace-with-suunto-session-encryption-key"
+  SUUNTO_EMAIL_HASH_PEPPER: "replace-with-suunto-email-hash-pepper"
 
 notifications:
   schedule: "*/2 * * * *"
 
 padiTokenRefresh:
   schedule: "*/30 * * * *"
+
+suuntoSidecar:
+  enabled: false
+  image:
+    repository: registry.pumpking.aleksandr.vin/dives/web
+    tag: amnesiac

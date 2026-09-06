@@ -74,6 +74,10 @@ spec:
               value: "{{ .Values.deploymentId }}"
             - name: OTEL_SERVICE_VERSION
               value: "{{ .Values.deploymentId }}"
+          {{- if .Values.suuntoSidecar.enabled }}
+            - name: SUUNTO_SIDECAR_URL
+              value: "http://127.0.0.1:{{ .Values.suuntoSidecar.port }}"
+          {{- end }}
           {{- range $key, $value := .Values.env }}
             - name: {{ $key | quote }}
               value: {{ $value | quote }}
@@ -139,6 +143,51 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.suuntoSidecar.enabled }}
+        - name: suunto-sidecar
+          image: {{ .Values.suuntoSidecar.image.repository }}:{{ .Values.suuntoSidecar.image.tag }}
+          imagePullPolicy: {{ .Values.suuntoSidecar.image.pullPolicy }}
+          command: ["node"]
+          args: ["scripts/suunto-sidecar/server.mjs"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: SUUNTO_SIDECAR_HOST
+              value: "127.0.0.1"
+            - name: SUUNTO_SIDECAR_PORT
+              value: {{ .Values.suuntoSidecar.port | quote }}
+            - name: SUUNTOOL_BIN
+              value: {{ .Values.suuntoSidecar.suuntoolBin | quote }}
+            - name: SUUNTOOL_TIMEOUT_MS
+              value: {{ .Values.suuntoSidecar.timeoutMs | quote }}
+            - name: SUUNTOOL_EXPORT_TIMEOUT_MS
+              value: {{ .Values.suuntoSidecar.exportTimeoutMs | quote }}
+            - name: SUUNTO_SIDECAR_MAX_REQUEST_BYTES
+              value: {{ .Values.suuntoSidecar.maxRequestBytes | quote }}
+            - name: SUUNTO_SIDECAR_MAX_BUNDLE_BYTES
+              value: {{ .Values.suuntoSidecar.maxBundleBytes | quote }}
+            - name: SUUNTO_SIDECAR_MAX_BUNDLE_FILES
+              value: {{ .Values.suuntoSidecar.maxBundleFiles | quote }}
+          ports:
+            - name: suunto
+              containerPort: {{ .Values.suuntoSidecar.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: suunto
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: suunto
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.suuntoSidecar.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: configs
           configMap:

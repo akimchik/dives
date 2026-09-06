@@ -20,6 +20,7 @@
     "notifications:process": "node scripts/notification-worker.mjs",
     "padi:refresh": "node scripts/padi-token-refresh.mjs",
     "padi:debug-logbook": "node scripts/padi/debug-logbook.mjs",
+    "suunto:sidecar": "node scripts/suunto-sidecar/server.mjs",
     "lint:unused": "knip"
   },
   "dependencies": {

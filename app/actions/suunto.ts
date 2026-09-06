@@ -147,9 +147,10 @@ export async function disconnectSuuntoAction(): Promise<SuuntoActionResult> {
   return { ok: true };
 }
 
-export async function fetchSuuntoWorkoutsAction(limit: number): Promise<FetchSuuntoActionResult> {
+export async function fetchSuuntoWorkoutsAction(daysBack: number): Promise<FetchSuuntoActionResult> {
   const user = await requireUser();
-  const boundedLimit = Math.max(1, Math.min(50, Math.floor(limit)));
+  const normalizedDaysBack = Number.isFinite(daysBack) ? Math.floor(daysBack) : 10;
+  const boundedDaysBack = Math.max(1, Math.min(365, normalizedDaysBack));
 
   let sessionJson: string | null;
   try {
@@ -163,7 +164,7 @@ export async function fetchSuuntoWorkoutsAction(limit: number): Promise<FetchSuu
 
   let workouts: SuuntoWorkoutSummary[];
   try {
-    ({ workouts } = await listSuuntoWorkouts(sessionJson, boundedLimit));
+    ({ workouts } = await listSuuntoWorkouts(sessionJson, boundedDaysBack));
   } catch (error) {
     if (error instanceof SuuntoSidecarError && error.reason === "auth_expired") {
       await markSuuntoNeedsReconnect(user.id);

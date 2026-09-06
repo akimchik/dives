@@ -32,6 +32,48 @@ function redact(value) {
     .replace(/("session"\s*:\s*)(\{[^}]*\}|"[^"]+")/gi, "$1[redacted]");
 }
 
+
+function logEvent(event, fields = {}) {
+  const payload = {
+    event,
+    timestamp: new Date().toISOString(),
+    ...fields,
+  };
+  console.log(redact(JSON.stringify(payload)));
+}
+
+function parsedShape(value) {
+  if (Array.isArray(value)) return { type: "array", length: value.length };
+  if (!value || typeof value !== "object") return { type: typeof value };
+  const record = value;
+  return {
+    type: "object",
+    keys: Object.keys(record).slice(0, 20),
+    payloadKeys: record.payload && typeof record.payload === "object" && !Array.isArray(record.payload)
+      ? Object.keys(record.payload).slice(0, 20)
+      : undefined,
+  };
+}
+
+function extractWorkouts(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== "object") return [];
+  const candidates = [
+    parsed.workouts,
+    parsed.items,
+    parsed.data,
+    parsed.results,
+    parsed.records,
+    parsed.payload,
+    parsed.payload?.workouts,
+    parsed.payload?.items,
+    parsed.payload?.data,
+    parsed.payload?.results,
+    parsed.payload?.records,
+  ];
+  return candidates.find(Array.isArray) || [];
+}
+
 function json(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
@@ -146,24 +188,46 @@ async function login(payload) {
     throw error;
   }
   return withTempSession(null, async ({ sessionPath }) => {
+    logEvent("suunto.login.start", { emailProvided: Boolean(payload.email) });
     const result = await runSuuntool(
       ["login", "--email", payload.email, "--password-stdin", "--format", "json"],
       { sessionPath, stdin: payload.password },
     );
+    logEvent("suunto.login.suuntool", {
+      exitCode: result.code,
+      stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+      stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+      stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
+    });
     assertOk(result);
-    return { sessionJson: await readFile(sessionPath, "utf8") };
+    const sessionJson = await readFile(sessionPath, "utf8");
+    logEvent("suunto.login.result", { sessionBytes: Buffer.byteLength(sessionJson, "utf8") });
+    return { sessionJson };
   });
 }
 
 async function listWorkouts(payload) {
-  const limit = Math.max(1, Math.min(100, Number(payload.limit || 10)));
+  const requestedLimit = Number(payload.limit || 10);
+  const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 10));
+  const since = typeof payload.since === "string" && payload.since.trim() ? payload.since.trim() : null;
   return withTempSession(payload.sessionJson, async ({ sessionPath }) => {
-    const result = await runSuuntool(["workouts", "list", "--limit", String(limit), "--format", "json"], {
-      sessionPath,
+    const args = ["workouts", "list", "--limit", String(limit), "--format", "json"];
+    if (since) args.splice(2, 0, "--since", since);
+    logEvent("suunto.workouts.list.start", { limit, since, hasSession: Boolean(payload.sessionJson) });
+    const result = await runSuuntool(args, { sessionPath });
+    logEvent("suunto.workouts.list.suuntool", {
+      limit,
+      since,
+      exitCode: result.code,
+      stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+      stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+      stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
     });
     assertOk(result);
     const parsed = parseJson(result.stdout, []);
-    return { workouts: Array.isArray(parsed) ? parsed : parsed.workouts || [] };
+    const workouts = extractWorkouts(parsed);
+    logEvent("suunto.workouts.list.result", { limit, since, workoutCount: workouts.length, shape: parsedShape(parsed) });
+    return { workouts };
   });
 }
 
@@ -180,12 +244,22 @@ async function getWorkout(payload) {
 async function exportWorkout(payload) {
   return withTempSession(payload.sessionJson, async ({ dir, sessionPath }) => {
     const bundleDir = join(dir, "bundle");
+    const workoutKey = String(payload.workoutKey);
+    logEvent("suunto.workouts.export.start", { workoutKey, hasSession: Boolean(payload.sessionJson) });
     const result = await runSuuntool(
-      ["workouts", "export", String(payload.workoutKey), "--bundle", bundleDir, "--format", "json"],
+      ["workouts", "export", workoutKey, "--bundle", bundleDir, "--format", "json"],
       { sessionPath, timeoutMs: EXPORT_TIMEOUT_MS },
     );
+    logEvent("suunto.workouts.export.suuntool", {
+      workoutKey,
+      exitCode: result.code,
+      stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+      stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+      stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
+    });
     assertOk(result);
     const files = await collectFiles(bundleDir);
+    logEvent("suunto.workouts.export.result", { workoutKey, fileCount: files.length, files: files.map((file) => file.path) });
     const fileByPath = new Map(files.map((file) => [file.path, file]));
     const workoutJson = parseJson(Buffer.from(fileByPath.get("workout.json")?.contentBase64 || "e30=", "base64").toString("utf8"), {});
     const workoutSmlJson = parseJson(Buffer.from(fileByPath.get("workout.sml.json")?.contentBase64 || "e30=", "base64").toString("utf8"), {});
@@ -221,14 +295,26 @@ createServer(async (req, res) => {
   const handler = routes[key];
   if (!handler) return json(res, 404, { error: "not found", reason: "not_found" });
 
+  const started = Date.now();
   try {
     const payload = req.method === "GET" ? {} : await body(req);
+    logEvent("suunto.request.start", { route: key });
     const result = await handler(payload);
+    logEvent("suunto.request.ok", { route: key, durationMs: Date.now() - started });
     json(res, 200, result);
   } catch (error) {
-    json(res, error.status || 500, {
+    const status = error.status || 500;
+    const reason = error.reason || "server";
+    logEvent("suunto.request.error", {
+      route: key,
+      status,
+      reason,
+      durationMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    json(res, status, {
       error: redact(error instanceof Error ? error.message : String(error)),
-      reason: error.reason || "server",
+      reason,
     });
   }
 }).listen(PORT, HOST, () => {

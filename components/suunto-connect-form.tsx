@@ -39,7 +39,7 @@ export function SuuntoConnectForm({
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [limit, setLimit] = useState("10");
+  const [daysBack, setDaysBack] = useState("10");
   const [showReconnectForm, setShowReconnectForm] = useState(false);
   const [fetchOpen, setFetchOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -77,7 +77,8 @@ export function SuuntoConnectForm({
 
   function handleFetch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const count = Number(limit);
+    const count = Number(daysBack);
+    if (!Number.isFinite(count)) return;
 
     startTransition(async () => {
       const result = await fetchSuuntoWorkoutsAction(count);
@@ -88,7 +89,7 @@ export function SuuntoConnectForm({
 
       const skipped = result.alreadySaved + result.alreadyStaged + result.skippedNonDives + result.failedExports;
       toast.success(
-        `Checked ${result.checked} workouts: staged ${result.staged}${skipped ? `, skipped ${skipped}` : ""}.`,
+        `Checked ${result.checked} workouts from the selected time window: staged ${result.staged}${skipped ? `, skipped ${skipped}` : ""}.`,
       );
       setFetchOpen(false);
       router.refresh();
@@ -122,25 +123,25 @@ export function SuuntoConnectForm({
                 <DialogHeader>
                   <DialogTitle>Fetch Suunto workouts</DialogTitle>
                   <DialogDescription>
-                    Choose how many recent workouts to check. Dive workouts that are already staged or
+                    Choose how many recent days to check. Dive workouts that are already staged or
                     saved are ignored.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="suunto-limit">Recent workouts to check</Label>
+                  <Label htmlFor="suunto-limit">Recent days to check</Label>
                   <Input
                     id="suunto-limit"
                     name="limit"
                     type="number"
                     min={1}
-                    max={50}
-                    value={limit}
-                    onChange={(event) => setLimit(event.target.value)}
+                    max={365}
+                    value={daysBack}
+                    onChange={(event) => setDaysBack(event.target.value)}
                     required
                   />
                 </div>
                 <DialogFooter>
-                  <Button type="submit" disabled={isPending || Number(limit) < 1 || Number(limit) > 50}>
+                  <Button type="submit" disabled={isPending || Number(daysBack) < 1 || Number(daysBack) > 365}>
                     {isPending ? <Loader2 className="animate-spin" /> : null}
                     Fetch workouts
                   </Button>

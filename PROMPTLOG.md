@@ -194,3 +194,17 @@ User asked to commit the completed Suunto staged import integration.
 ## 2026-09-06 11:12 CEST — Suunto Connect Temporarily Unavailable
 
 User reported that after deployment, connecting to Suunto from Integrations page returns: 'Suunto import is temporarily unavailable. Please try again later.'
+
+## 2026-09-06 13:56 CEST — Suunto Error Persists
+
+User reported the Integrations UI still returns: 'Suunto import is temporarily unavailable. Please try again later.'
+
+## 2026-09-06 14:43 CEST — Suunto Fetch Checks Zero Workouts
+
+User reported Suunto connect now appears working, but fetching for the last 10 days says: Checked 0 workouts: staged 0, while there are 4 diving workouts.
+
+## 2026-09-06 15:37 CEST — Continue Suunto Zero Workouts Debug
+continue. It looks like working now. But for the last 10 days it says: Checked 0 workouts: staged 0.While there are 4 diving workouts :
+
+## 2026-09-06 15:37 CEST — Add Suunto Sidecar Logs
+Add logs to suunto-sidecar

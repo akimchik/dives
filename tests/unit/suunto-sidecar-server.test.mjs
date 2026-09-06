@@ -55,7 +55,9 @@ if (args[0] === "version") {
     console.log(JSON.stringify({ ok: true }));
   });
 } else if (args.join(" ") === "workouts list --limit 2 --format json") {
-  console.log(JSON.stringify([{ key: "6tv4q2ak4ksqlrth" }]));
+  console.log(JSON.stringify({ payload: { workouts: [{ key: "6tv4q2ak4ksqlrth" }] } }));
+} else if (args.join(" ") === "workouts list --since 10d --limit 100 --format json") {
+  console.log(JSON.stringify({ items: [{ key: "since-window" }] }));
 } else if (args[0] === "workouts" && args[1] === "export") {
   const dir = args[args.indexOf("--bundle") + 1];
   mkdirSync(dir, { recursive: true });
@@ -105,6 +107,13 @@ describe("suunto sidecar server", () => {
       body: JSON.stringify({ sessionJson: loginJson.sessionJson, limit: 2 }),
     });
     expect(await list.json()).toEqual({ workouts: [{ key: "6tv4q2ak4ksqlrth" }] });
+
+    const sinceList = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: loginJson.sessionJson, limit: 100, since: "10d" }),
+    });
+    expect(await sinceList.json()).toEqual({ workouts: [{ key: "since-window" }] });
 
     const exported = await fetch(`${baseUrl}/workouts/export`, {
       method: "POST",

@@ -279,13 +279,13 @@ and serves every non-PADI page/test normally.
 
 ## Suunto staged imports
 
-Suunto integration is fetch-only and user-triggered. The Next app talks only to a
+Suunto integration is fetch-only and user-triggered. The fetch dialog asks for how many recent days to check and the sidecar lists workouts with `suuntool workouts list --since <days>d --limit 100 --format json`. The Next app talks only to a
 pod-local, stateless suuntool sidecar (`scripts/suunto-sidecar/server.mjs`) over
 `http://127.0.0.1:<port>`; there is no Service, Ingress, PVC, background sync, or
 Suunto write-back path. The sidecar runs fixed `suuntool` commands, passes the
 Suunto password to `suuntool login --password-stdin`, writes any supplied session
 to a temporary `SUUNTOOL_SESSION_FILE`, and deletes that temp directory after the
-request.
+request. It emits structured JSON logs for request lifecycle, suuntool exit codes, output sizes, list result shape/counts, and export bundle file names; password and session payloads are redacted before logging.
 
 The app owns persistence. `suunto_integrations` stores only a hashed email and an
 encrypted suuntool session JSON (`SUUNTO_SESSION_ENCRYPTION_KEY`, falling back to

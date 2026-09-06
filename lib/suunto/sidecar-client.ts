@@ -106,9 +106,11 @@ export async function suuntoLogin(email: string, password: string): Promise<Suun
 
 export async function listSuuntoWorkouts(
   sessionJson: string,
-  limit: number,
+  daysBack: number,
 ): Promise<{ workouts: SuuntoWorkoutSummary[] }> {
-  return callSidecar("/workouts/list", { sessionJson, limit });
+  const normalizedDaysBack = Number.isFinite(daysBack) ? Math.floor(daysBack) : 10;
+  const since = `${Math.max(1, normalizedDaysBack)}d`;
+  return callSidecar("/workouts/list", { sessionJson, limit: 100, since });
 }
 
 export async function exportSuuntoWorkout(

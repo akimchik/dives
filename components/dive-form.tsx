@@ -571,12 +571,14 @@ export function DiveForm({
     dive ? stateFromDive(dive) : draftDive ? stateFromDraft(draftDive) : blankState(),
   );
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeStep, setMergeStep] = useState<"target" | "fields">("target");
   const [mergeTargetId, setMergeTargetId] = useState<number | null>(suuntoMergeCandidates[0]?.id ?? null);
   const [mergeChoices, setMergeChoices] = useState<Record<MergeFieldKey, MergeSource>>(() =>
     Object.fromEntries(mergeFields.map((field) => [field.key, "import"])) as Record<MergeFieldKey, MergeSource>,
   );
   const [isPending, startTransition] = useTransition();
   const neutralPlaceholder = (example: string) => (dive ? "--" : example);
+  const selectedMergeTarget = suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId) ?? null;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setState((previous) => ({ ...previous, [key]: value }));
@@ -719,6 +721,7 @@ export function DiveForm({
 
       toast.success("Suunto dive merged into existing dive.");
       setMergeOpen(false);
+      setMergeStep("target");
       router.refresh();
       if ("nextImportId" in result && result.nextImportId !== null) {
         router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
@@ -1057,7 +1060,15 @@ export function DiveForm({
           {submitLabel ?? (dive ? "Save changes" : "Log dive")}
         </Button>
         {suuntoImportId !== undefined && suuntoMergeCandidates.length > 0 ? (
-          <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => setMergeOpen(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canSubmit}
+            onClick={() => {
+              setMergeStep("target");
+              setMergeOpen(true);
+            }}
+          >
             <GitMerge />
             Merge into existing dive
           </Button>
@@ -1072,91 +1083,127 @@ export function DiveForm({
         </Button>
       </div>
 
-      <Dialog open={mergeOpen} onOpenChange={(open) => !isPending && setMergeOpen(open)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Merge Suunto import into existing dive</DialogTitle>
-            <DialogDescription>
-              Pick the existing dive to keep. The reviewed fields on this page and the Suunto chart
-              data will be saved onto that dive, then this staged import will be removed.
-            </DialogDescription>
-          </DialogHeader>
+      <Dialog
+        open={mergeOpen}
+        onOpenChange={(open) => {
+          if (isPending) return;
+          setMergeOpen(open);
+          if (!open) setMergeStep("target");
+        }}
+      >
+        <DialogContent className={mergeStep === "fields" ? "max-w-4xl" : "max-w-2xl"}>
+          {mergeStep === "target" ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Merge Suunto import into existing dive</DialogTitle>
+                <DialogDescription>
+                  Pick the existing dive to update. You will choose which fields survive on the next step.
+                </DialogDescription>
+              </DialogHeader>
 
-          <div className="flex max-h-[30rem] flex-col gap-5 overflow-y-auto pr-1">
-            <div className="flex flex-col gap-2">
-              {suuntoMergeCandidates.map((candidate, index) => (
-                <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
-                  <input
-                    type="radio"
-                    name="suunto-merge-target"
-                    checked={mergeTargetId === candidate.id}
-                    onChange={() => setMergeTargetId(candidate.id)}
-                    disabled={isPending}
-                  />
-                  <span className="flex flex-col gap-1">
-                    <span className="font-medium">
-                      {candidate.title || candidate.siteName || `Dive #${candidate.id}`}
-                      {index === 0 ? <span className="ml-2 text-xs text-muted-foreground">closest by date</span> : null}
+              <div className="flex max-h-[30rem] flex-col gap-3 overflow-y-auto pr-1">
+                {suuntoMergeCandidates.map((candidate, index) => (
+                  <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
+                    <input
+                      type="radio"
+                      name="suunto-merge-target"
+                      checked={mergeTargetId === candidate.id}
+                      onChange={() => setMergeTargetId(candidate.id)}
+                      disabled={isPending}
+                    />
+                    <span className="flex flex-col gap-1">
+                      <span className="font-medium">
+                        {candidate.title || candidate.siteName || `Dive #${candidate.id}`}
+                        {index === 0 ? <span className="ml-2 text-xs text-muted-foreground">closest by date</span> : null}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{formatCandidate(candidate)}</span>
                     </span>
-                    <span className="text-xs text-muted-foreground">{formatCandidate(candidate)}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            {suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId) ? (
-              <div className="rounded-md border">
-                <div className="grid grid-cols-[8rem_1fr_1fr] border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
-                  <span>Property</span>
-                  <span>Reviewed Suunto import</span>
-                  <span>Existing dive</span>
-                </div>
-                {mergeFields.map((field) => {
-                  const target = suuntoMergeCandidates.find((candidate) => candidate.id === mergeTargetId);
-                  if (!target) return null;
-
-                  return (
-                    <div
-                      key={field.key}
-                      className="grid grid-cols-[8rem_1fr_1fr] items-center gap-2 border-b px-3 py-2 last:border-b-0"
-                    >
-                      <span className="text-xs font-medium">{field.label}</span>
-                      <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="radio"
-                          name={`suunto-merge-${field.key}`}
-                          checked={mergeChoices[field.key] === "import"}
-                          onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "import" }))}
-                          disabled={isPending}
-                        />
-                        <span className="truncate">{formatMergeValue(state[field.key])}</span>
-                      </label>
-                      <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="radio"
-                          name={`suunto-merge-${field.key}`}
-                          checked={mergeChoices[field.key] === "target"}
-                          onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "target" }))}
-                          disabled={isPending}
-                        />
-                        <span className="truncate">{formatMergeValue(target.values[field.key])}</span>
-                      </label>
-                    </div>
-                  );
-                })}
+                  </label>
+                ))}
               </div>
-            ) : null}
-          </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={isPending} onClick={() => setMergeOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="button" disabled={!canSubmit || mergeTargetId === null} onClick={mergeIntoExistingDive}>
-              {isPending ? <Loader2 className="animate-spin" /> : null}
-              Merge into selected dive
-            </Button>
-          </DialogFooter>
+              <DialogFooter>
+                <Button type="button" variant="outline" disabled={isPending} onClick={() => setMergeOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!canSubmit || selectedMergeTarget === null}
+                  onClick={() => setMergeStep("fields")}
+                >
+                  Choose surviving fields
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Choose surviving fields</DialogTitle>
+                <DialogDescription>
+                  For each property, choose whether the reviewed Suunto import or the existing dive value should be
+                  kept. The Suunto workout id, chart data, and original bundle will be attached to the selected dive.
+                </DialogDescription>
+              </DialogHeader>
+
+              {selectedMergeTarget ? (
+                <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-1">
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                    Merging into{" "}
+                    <span className="font-medium">
+                      {selectedMergeTarget.title || selectedMergeTarget.siteName || `Dive #${selectedMergeTarget.id}`}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">{formatCandidate(selectedMergeTarget)}</span>
+                  </div>
+
+                  <div className="rounded-md border">
+                    <div className="grid grid-cols-[8rem_1fr_1fr] border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                      <span>Property</span>
+                      <span>Reviewed Suunto import</span>
+                      <span>Existing dive</span>
+                    </div>
+                    {mergeFields.map((field) => (
+                      <div
+                        key={field.key}
+                        className="grid grid-cols-[8rem_1fr_1fr] items-center gap-2 border-b px-3 py-2 last:border-b-0"
+                      >
+                        <span className="text-xs font-medium">{field.label}</span>
+                        <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name={`suunto-merge-${field.key}`}
+                            checked={mergeChoices[field.key] === "import"}
+                            onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "import" }))}
+                            disabled={isPending}
+                          />
+                          <span className="truncate">{formatMergeValue(state[field.key])}</span>
+                        </label>
+                        <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name={`suunto-merge-${field.key}`}
+                            checked={mergeChoices[field.key] === "target"}
+                            onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "target" }))}
+                            disabled={isPending}
+                          />
+                          <span className="truncate">{formatMergeValue(selectedMergeTarget.values[field.key])}</span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <DialogFooter>
+                <Button type="button" variant="outline" disabled={isPending} onClick={() => setMergeStep("target")}>
+                  Back
+                </Button>
+                <Button type="button" disabled={!canSubmit || selectedMergeTarget === null} onClick={mergeIntoExistingDive}>
+                  {isPending ? <Loader2 className="animate-spin" /> : null}
+                  Merge selected fields
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </form>

@@ -226,3 +226,7 @@ The merge of the suunto staged dive shows a dialog to select the target dive, bu
 ## 2026-09-06 19:31 CEST — Dashboard Fetch Buttons
 
 Rename "Sync PADI" to "Fetch PADI" and add "Fetch Suunto" buttons to Dashboard
+
+## 2026-09-06 20:25 CEST — Suunto Merge Field Dialog Missing
+
+The merge of suunto dive still does not show dialog to select surviving fields

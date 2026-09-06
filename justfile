@@ -14,3 +14,8 @@ dev-values-secret:
     base64 < dev-values.yaml | tr -d '\n' | pbcopy
     echo "Copied base64-encoded dev-values.yaml to clipboard."
     echo "Paste as the DEV_VALUES_YAML secret (repo -> Settings -> Actions -> Secrets)."
+
+update-dev-values-secret:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base64 < dev-values.yaml | tr -d '\n' | tea actions secrets set --stdin DEV_VALUES_YAML

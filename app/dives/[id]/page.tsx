@@ -255,7 +255,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
               <CardTitle>Suunto profile</CardTitle>
             </CardHeader>
             <CardContent>
-              <SuuntoProfileChart profile={suuntoProfile} />
+              <SuuntoProfileChart points={suuntoProfile.points} />
             </CardContent>
           </Card>
         ) : profile ? (

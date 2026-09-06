@@ -123,7 +123,7 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
 
         <Card>
           <CardContent className="px-4">
-            <SuuntoProfileChart profile={pending.compiled_profile} />
+            <SuuntoProfileChart points={pending.compiled_profile.points} />
           </CardContent>
         </Card>
 

@@ -1,7 +1,7 @@
 import type { DepthPoint } from "@/lib/depth-profile";
 import type { DiveInput } from "@/lib/dives";
 
-type SuuntoDiveProfilePoint = {
+export type SuuntoDiveProfilePoint = {
   time: number;
   timestamp: string;
   depth: number | null;

@@ -10,7 +10,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { SuuntoDiveProfile } from "@/lib/suunto/profile";
+import type { SuuntoDiveProfilePoint } from "@/lib/suunto/profile";
 import { cn } from "@/lib/utils";
 
 type SeriesKey = "depth" | "temperature" | "tankPressure" | "gasConsumption";
@@ -30,32 +30,36 @@ const chartConfig = Object.fromEntries(
   SERIES.map((series) => [series.key, { label: series.label, color: series.color }]),
 ) satisfies ChartConfig;
 
-function hasValues(profile: SuuntoDiveProfile, key: SeriesKey): boolean {
-  return profile.points.some((point) => {
+function hasValues(points: SuuntoDiveProfilePoint[], key: SeriesKey): boolean {
+  return points.some((point) => {
     const value = point[key];
     return typeof value === "number" && Number.isFinite(value);
   });
 }
 
+// Takes just the points, not the whole SuuntoDiveProfile: this is a client component, and Next.js
+// serializes every field of a client-component prop into the page (it doesn't tree-shake unread
+// ones) -- the rest of the profile carries the raw Suunto summary blob, including a
+// non-workout-scoped GPS fix that lib/suunto/profile.ts's own derived `location` deliberately
+// excludes from ever being attributed to a dive (see the "Trust only workout-scoped Suunto
+// coordinates" commit). Shipping that blob to the browser just because a chart needed depth/temp/
+// pressure/gas would undo that guarantee.
 export function SuuntoProfileChart({
-  profile,
+  points,
   className,
 }: {
-  profile: SuuntoDiveProfile;
+  points: SuuntoDiveProfilePoint[];
   className?: string;
 }) {
-  const available = useMemo(
-    () => SERIES.filter((series) => hasValues(profile, series.key)),
-    [profile],
-  );
+  const available = useMemo(() => SERIES.filter((series) => hasValues(points, series.key)), [points]);
   const [active, setActive] = useState<SeriesKey | null>(null);
 
-  if (profile.points.length < 2 || available.length === 0) return null;
+  if (points.length < 2 || available.length === 0) return null;
 
   const activeSeries = available.find((series) => series.key === active) ?? available[0];
   const gradientId = `suuntoFill-${activeSeries.key}`;
 
-  const data = profile.points.map((point) => ({
+  const data = points.map((point) => ({
     time: point.time,
     value: typeof point[activeSeries.key] === "number" ? point[activeSeries.key] : null,
   }));

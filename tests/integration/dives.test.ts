@@ -33,7 +33,9 @@ const {
   listDiveSitesWithDiveCounts,
   listDives,
   listRecentCylinders,
+  listSuuntoMergeDiveCandidates,
   mergeDiveSites,
+  mergeSuuntoImportIntoDive,
   updateDive,
   updateDiveSite,
   DiveNotFoundError,
@@ -412,7 +414,8 @@ function suuntoProfile(workoutKey: string): SuuntoDiveProfile {
     tankStartPressure: 184.6,
     tankEndPressure: 94.1,
     tankSizeLitres: 14,
-    gasMix: "Air 21% O₂",
+    gasMix: "Air",
+    location: null,
     points: [
       {
         time: 0,
@@ -523,6 +526,51 @@ describe("createDiveFromSuuntoImport (human-reviewed staged import path)", () =>
     const conflicted = await createDiveFromSuuntoImport(owner, staged.id, diveInput());
     expect(conflicted).toEqual({ inserted: false, reason: "already_saved" });
     expect(await getPendingSuuntoImport(owner.id, staged.id)).toBeNull();
+  });
+
+  it("merges a reviewed Suunto import into an existing dive selected by date", async () => {
+    const owner = await createOwner();
+    const target = await createDive(
+      owner,
+      diveInput({
+        title: "Existing handwritten dive",
+        occurredAt: "2026-08-30T08:41:00.000Z",
+        maxDepth: 1,
+        bottomTimeMinutes: 1,
+      }),
+    );
+    await createDive(owner, diveInput({ title: "Far away dive", occurredAt: "2026-01-01T00:00:00.000Z" }));
+    const staged = await stageSuunto(owner);
+
+    const candidates = await listSuuntoMergeDiveCandidates(owner.id, staged.profile.startedAt);
+    expect(candidates[0]).toMatchObject({ id: target.id, title: "Existing handwritten dive" });
+
+    const result = await mergeSuuntoImportIntoDive(
+      owner,
+      staged.id,
+      target.id,
+      diveInput({ title: "Reviewed merge", maxDepth: 8.82, endPressure: 94.1 }),
+    );
+
+    expect(result.merged).toBe(true);
+    if (!result.merged) throw new Error("expected merge");
+
+    const stored = await getDive(owner.id, target.id);
+    expect(stored?.title).toBe("Reviewed merge");
+    expect(stored?.suunto_workout_key).toBe(staged.workoutKey);
+    expect(stored?.suunto_profile).toMatchObject({ source: "suunto", workoutKey: staged.workoutKey });
+    expect(stored?.padi_dive_id).toBeNull();
+    expect(await getPendingSuuntoImport(owner.id, staged.id)).toBeNull();
+
+    const raw = await getTestPool().query<{ bundle: Buffer }>(
+      "select suunto_original_bundle as bundle from dives where id = $1 and user_id = $2",
+      [target.id, owner.id],
+    );
+    expect(raw.rows[0].bundle.toString("utf8")).toBe(`bundle:${staged.workoutKey}`);
+
+    const [row] = await backupRows(target.id, "edit");
+    expect(row.payload.dive.suunto_original_bundle).toBeUndefined();
+    expect(row.payload.dive.suunto_workout_key).toBe(staged.workoutKey);
   });
 
   it("excludes original Suunto bundles from backup payloads while preserving a compact profile summary", async () => {

@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Star } from "lucide-react";
+import { GitMerge, Loader2, Save, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { createDiveAction, recentCylindersAction, updateDiveAction } from "@/app/actions/dives";
-import { createSuuntoDiveImportAction } from "@/app/actions/suunto";
+import { createSuuntoDiveImportAction, mergeSuuntoDiveImportAction } from "@/app/actions/suunto";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DepthProfileField } from "@/components/depth-profile-field";
 import {
@@ -17,6 +17,14 @@ import {
 } from "@/components/dive-site-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -54,6 +62,15 @@ const INTENSITIES = ["None", "Mild", "Moderate", "Strong"];
 const WEIGHT_FEEDBACK = ["Underweight", "Perfect", "Overweight"];
 const WATER_TYPES = ["Salt", "Fresh", "Brackish"];
 const BODIES_OF_WATER = ["Ocean", "Lake", "Quarry", "River"];
+
+export type SuuntoMergeCandidate = {
+  id: number;
+  title: string | null;
+  occurredAt: string;
+  maxDepth: string | null;
+  bottomTimeMinutes: number | null;
+  siteName: string | null;
+};
 
 type FormState = {
   title: string;
@@ -362,6 +379,18 @@ function formatCylinderOption(option: RecentCylinder): string {
   return [option.tankInfo, size].filter(Boolean).join(" · ") || "—";
 }
 
+function formatCandidate(candidate: SuuntoMergeCandidate): string {
+  const date = new Date(candidate.occurredAt);
+  const when = Number.isFinite(date.getTime()) ? date.toLocaleString() : candidate.occurredAt;
+  const details = [
+    candidate.siteName,
+    candidate.maxDepth ? `${trimNumeric(candidate.maxDepth)} m` : null,
+    candidate.bottomTimeMinutes === null ? null : `${candidate.bottomTimeMinutes} min`,
+  ].filter(Boolean);
+
+  return `${when}${details.length ? ` · ${details.join(" · ")}` : ""}`;
+}
+
 // Optional convenience, not a bound form field -- deliberately uncontrolled, so after a pick the
 // trigger just shows that option's own label rather than needing to reset back to a placeholder.
 function RecentCylinderPicker({
@@ -437,12 +466,14 @@ export function DiveForm({
   dive,
   draftDive,
   suuntoImportId,
+  suuntoMergeCandidates = [],
   cancelHref,
   submitLabel,
 }: {
   dive?: DiveRecord;
   draftDive?: Partial<DiveInput>;
   suuntoImportId?: number;
+  suuntoMergeCandidates?: SuuntoMergeCandidate[];
   cancelHref?: string;
   submitLabel?: string;
 }) {
@@ -451,6 +482,8 @@ export function DiveForm({
   const [state, setState] = useState<FormState>(() =>
     dive ? stateFromDive(dive) : draftDive ? stateFromDraft(draftDive) : blankState(),
   );
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState<number | null>(suuntoMergeCandidates[0]?.id ?? null);
   const [isPending, startTransition] = useTransition();
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -480,18 +513,17 @@ export function DiveForm({
   const profileIsInvalid = profileResult !== null && !profileResult.ok;
   const canSubmit = Boolean(state.occurredAt) && !profileIsInvalid && !isPending;
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    // Belt and braces: the submit button is already disabled in this state, but a keyboard Enter
-    // on a text input must not slip past it. A malformed profile never reaches the server, so
+  function validateProfile() {
+    // Belt and braces: submit/merge buttons are already disabled in this state, but keyboard Enter
+    // and dialog buttons must not slip past it. A malformed profile never reaches the server, so
     // `depth_profile` is never partially written.
-    if (profileIsInvalid) {
-      toast.error(profileResult.error);
-      return;
-    }
+    if (!profileIsInvalid) return true;
+    toast.error(profileResult.error);
+    return false;
+  }
 
-    const input: DiveInput = {
+  function buildInput(): DiveInput {
+    return {
       site: toSiteSelection(state.site),
       title: optionalText(state.title),
       occurredAt: new Date(state.occurredAt),
@@ -527,6 +559,13 @@ export function DiveForm({
       depthProfile: profileResult?.ok ? profileResult.points : state.depthProfileRaw.trim() ? null : initialDepthProfile,
       depthProfileRaw: optionalText(state.depthProfileRaw),
     };
+  }
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!validateProfile()) return;
+
+    const input = buildInput();
 
     startTransition(async () => {
       const result =
@@ -548,6 +587,31 @@ export function DiveForm({
       // push could resolve from the stale cache before refresh got a chance to invalidate it).
       router.refresh();
       if (suuntoImportId !== undefined && "nextImportId" in result && result.nextImportId !== null) {
+        router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
+      } else {
+        router.push(`/dives/${result.id}`);
+      }
+    });
+  }
+
+  function mergeIntoExistingDive() {
+    if (suuntoImportId === undefined || mergeTargetId === null) return;
+    if (!validateProfile()) return;
+
+    const input = buildInput();
+
+    startTransition(async () => {
+      const result = await mergeSuuntoDiveImportAction(suuntoImportId, mergeTargetId, input);
+
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success("Suunto dive merged into existing dive.");
+      setMergeOpen(false);
+      router.refresh();
+      if ("nextImportId" in result && result.nextImportId !== null) {
         router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
       } else {
         router.push(`/dives/${result.id}`);
@@ -882,6 +946,12 @@ export function DiveForm({
           {isPending ? <Loader2 className="animate-spin" /> : <Save />}
           {submitLabel ?? (dive ? "Save changes" : "Log dive")}
         </Button>
+        {suuntoImportId !== undefined && suuntoMergeCandidates.length > 0 ? (
+          <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => setMergeOpen(true)}>
+            <GitMerge />
+            Merge into existing dive
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"
@@ -891,6 +961,49 @@ export function DiveForm({
           Cancel
         </Button>
       </div>
+
+      <Dialog open={mergeOpen} onOpenChange={(open) => !isPending && setMergeOpen(open)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Merge Suunto import into existing dive</DialogTitle>
+            <DialogDescription>
+              Pick the existing dive to keep. The reviewed fields on this page and the Suunto chart
+              data will be saved onto that dive, then this staged import will be removed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex max-h-[24rem] flex-col gap-2 overflow-y-auto">
+            {suuntoMergeCandidates.map((candidate, index) => (
+              <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
+                <input
+                  type="radio"
+                  name="suunto-merge-target"
+                  checked={mergeTargetId === candidate.id}
+                  onChange={() => setMergeTargetId(candidate.id)}
+                  disabled={isPending}
+                />
+                <span className="flex flex-col gap-1">
+                  <span className="font-medium">
+                    {candidate.title || candidate.siteName || `Dive #${candidate.id}`}
+                    {index === 0 ? <span className="ml-2 text-xs text-muted-foreground">closest by date</span> : null}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatCandidate(candidate)}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={isPending} onClick={() => setMergeOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={!canSubmit || mergeTargetId === null} onClick={mergeIntoExistingDive}>
+              {isPending ? <Loader2 className="animate-spin" /> : null}
+              Merge into selected dive
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

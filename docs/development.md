@@ -305,7 +305,21 @@ is a normal local dive eligible for PADI upload.
 `lib/suunto/profile.ts` compiles `workout.sml.json` into a versioned JSON profile
 with depth, temperature, tank pressure and gas-consumption points, while also
 producing the simple `{ time, depth }[]` `depth_profile` used by the existing
-chart/form code.
+chart/form code. Suunto SML exports can split `DiveHeader`, `DiveFooter`,
+`Windows`, and `Header` across separate summary samples; the parser merges those
+rows before extracting average depth, dive/bottom time, pressure endpoints and
+location. Exported workout metadata does not include a human-readable site name,
+and may carry zeroed top-level positions; when SML footer coordinates are present
+they are converted from radians to degrees and drafted as a coordinate-named site
+(`Suunto GPS <lat>, <lng>`) for user review. Plain air is normalized to `Air`
+rather than `Air 21% O₂`.
+
+The Suunto review form can either save the staged import as a new dive or merge it
+into an existing user-owned dive. Merge candidates are existing dives without a
+Suunto workout id, ordered by closeness to the staged workout date. Merging uses
+the reviewed form fields, attaches the Suunto workout id/profile/original bundle
+to the selected dive, deletes the staged import, and enqueues a normal edit backup
+in one transaction.
 
 ## Tests
 

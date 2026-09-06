@@ -24,6 +24,7 @@ export type SuuntoDiveProfile = {
   tankEndPressure: number | null;
   tankSizeLitres: number | null;
   gasMix: string | null;
+  location: { lat: number; lng: number } | null;
   points: SuuntoDiveProfilePoint[];
   depthProfile: DepthPoint[];
   summary: Record<string, unknown>;
@@ -128,15 +129,22 @@ function summaryRecords(root: JsonRecord): JsonRecord[] {
 }
 
 function findDiveSummary(root: JsonRecord): JsonRecord {
+  const merged: JsonRecord = {};
+  const windows: unknown[] = [];
+
   for (const entry of summaryRecords(root)) {
     const attrs = asRecord(entry.Attributes);
     const sml = asRecord(attrs["suunto/sml"]);
     const sample = asRecord(sml.Sample ?? sml ?? entry.Sample);
-    if (isRecord(sample.DiveHeader) || isRecord(sample.DiveFooter) || isRecord(sample.Windows)) {
-      return sample;
-    }
+
+    if (isRecord(sample.DiveHeader) && !isRecord(merged.DiveHeader)) merged.DiveHeader = sample.DiveHeader;
+    if (isRecord(sample.DiveFooter) && !isRecord(merged.DiveFooter)) merged.DiveFooter = sample.DiveFooter;
+    if (Array.isArray(sample.Windows)) windows.push(...sample.Windows);
+    if (isRecord(sample.Header) && !isRecord(merged.Header)) merged.Header = sample.Header;
   }
-  return {};
+
+  if (windows.length > 0) merged.Windows = windows;
+  return merged;
 }
 
 function firstGasMix(summary: JsonRecord): string | null {
@@ -144,7 +152,26 @@ function firstGasMix(summary: JsonRecord): string | null {
   const gases = header.Gases;
   if (!Array.isArray(gases)) return null;
   const oxygen = firstNumber(asRecord(gases[0]).Oxygen);
-  return oxygen === null ? null : `Air ${Math.round(oxygen)}% O₂`;
+  if (oxygen === null) return null;
+  return Math.round(oxygen) === 21 ? "Air" : `EAN${Math.round(oxygen)}`;
+}
+
+function degreesFromSuuntoCoordinate(value: unknown): number | null {
+  const number = numberValue(value);
+  if (number === null || number === 0) return null;
+  const degrees = Math.abs(number) <= Math.PI ? (number * 180) / Math.PI : number;
+  return round(degrees, 6);
+}
+
+function firstLocation(summary: JsonRecord): { lat: number; lng: number } | null {
+  const footer = asRecord(summary.DiveFooter);
+  const location = asRecord(footer.LastKnownCoordinates);
+  const stop = asRecord(asRecord(footer.DiveLocation).Stop);
+  const start = asRecord(asRecord(footer.DiveLocation).Start);
+
+  const lat = degreesFromSuuntoCoordinate(location.Latitude ?? stop.Latitude ?? start.Latitude);
+  const lng = degreesFromSuuntoCoordinate(location.Longitude ?? stop.Longitude ?? start.Longitude);
+  return lat === null || lng === null ? null : { lat, lng };
 }
 
 function hasDiveMarkers(root: JsonRecord, diveSummary: JsonRecord): boolean {
@@ -171,6 +198,14 @@ export function isSuuntoDiveProfile(value: unknown): value is SuuntoDiveProfile 
 function draftDiveFromSuuntoProfile(profile: SuuntoDiveProfile): Partial<DiveInput> {
   return {
     title: "Suunto dive",
+    site: profile.location
+      ? {
+          name: `Suunto GPS ${profile.location.lat.toFixed(4)}, ${profile.location.lng.toFixed(4)}`,
+          location: `${profile.location.lat}, ${profile.location.lng}`,
+          lat: profile.location.lat,
+          lng: profile.location.lng,
+        }
+      : null,
     occurredAt: profile.startedAt ?? new Date().toISOString(),
     maxDepth: profile.maxDepth,
     avgDepth: profile.averageDepth,
@@ -204,12 +239,16 @@ export function compileSuuntoDiveProfile(
   const header = asRecord(diveSummary.DiveHeader);
   const footer = asRecord(diveSummary.DiveFooter);
   const windows = Array.isArray(diveSummary.Windows) ? diveSummary.Windows.map(asRecord) : [];
-  const window0 = windows[0] ?? {};
+  const window0 =
+    windows.find((window) => window.Type === "Dive") ??
+    windows.find((window) => window.Type === "Activity") ??
+    windows[0] ??
+    {};
   const footerGas = Array.isArray(footer.Gases) ? asRecord(footer.Gases[0]) : {};
   const headerGas = Array.isArray(header.Gases) ? asRecord(header.Gases[0]) : {};
 
-  const startPressure = barFromPascal(firstNumber(footerGas.StartPressure, headerGas.TankFillPressure));
-  const endPressure = barFromPascal(footerGas.EndPressure);
+  const startPressure = barFromPascal(firstNumber(footerGas.StartPressure, headerGas.StartPressure, headerGas.TankFillPressure));
+  const endPressure = barFromPascal(firstNumber(footerGas.EndPressure, headerGas.EndPressure));
   const tankSizeLitres = firstNumber(headerGas.TankSize);
   const tankSize = tankSizeLitres === null ? null : round(tankSizeLitres * (tankSizeLitres < 1 ? 1000 : 1), 1);
 
@@ -262,8 +301,9 @@ export function compileSuuntoDiveProfile(
     firstNumber(window0.MaxDepth, summaryDepth.Max, Math.max(...depthProfile.map((p) => p.depth))),
     2,
   );
-  const averageDepth = round(firstNumber(window0.AverageDepth, summaryDepth.Avg), 2);
-  const durationSeconds = firstNumber(window0.DiveTime, window0.Duration);
+  const headerSummary = asRecord(diveSummary.Header);
+  const averageDepth = round(firstNumber(window0.DepthAverage, window0.AverageDepth, summaryDepth.Avg, headerSummary.DepthAverage), 2);
+  const durationSeconds = firstNumber(window0.DiveTime, window0.DiveTimeMax, headerSummary.DiveTime, headerSummary.DiveTimeMax, window0.Duration);
   const durationMinutes = durationSeconds === null ? null : round(durationSeconds / 60, 1);
   const startedAt = rawPoints[0]?.timestamp ?? null;
   const waterTemperature =
@@ -284,6 +324,7 @@ export function compileSuuntoDiveProfile(
     tankEndPressure: endPressure,
     tankSizeLitres: tankSize,
     gasMix: firstGasMix(diveSummary),
+    location: firstLocation(diveSummary),
     points: rawPoints,
     depthProfile,
     summary: diveSummary,

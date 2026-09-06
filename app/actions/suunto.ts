@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createDiveFromSuuntoImport, type DiveInput } from "@/lib/dives";
+import { createDiveFromSuuntoImport, mergeSuuntoImportIntoDive, type DiveInput } from "@/lib/dives";
 import {
   assertSuuntoIntegrationConfigured,
   deleteSuuntoIntegration,
@@ -54,7 +54,7 @@ export type FetchSuuntoActionResult =
 
 export type SaveSuuntoImportActionResult =
   | { ok: true; id: number; nextImportId: number | null; pendingCount: number }
-  | { ok: false; error: string; reason: "missing_import" | "already_saved" | "unknown" };
+  | { ok: false; error: string; reason: "missing_import" | "missing_dive" | "already_saved" | "unknown" };
 
 function revalidateSuuntoPaths(diveId?: number) {
   revalidatePath("/settings/integrations");
@@ -285,6 +285,40 @@ export async function createSuuntoDiveImportAction(
     return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
   } catch (error) {
     console.error("Suunto import save failed", error);
+    return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
+  }
+}
+
+export async function mergeSuuntoDiveImportAction(
+  importId: number,
+  targetDiveId: number,
+  input: DiveInput,
+): Promise<SaveSuuntoImportActionResult> {
+  const user = await requireUser();
+
+  try {
+    const result = await mergeSuuntoImportIntoDive(user, importId, targetDiveId, input);
+    if (!result.merged) {
+      return {
+        ok: false,
+        reason: result.reason,
+        error:
+          result.reason === "already_saved"
+            ? "This Suunto workout was already saved. Delete the saved dive before importing it again."
+            : result.reason === "missing_dive"
+              ? "That target dive is no longer available."
+              : "That Suunto import is no longer available.",
+      };
+    }
+
+    const [pendingCount, pending] = await Promise.all([
+      countPendingSuuntoImports(user.id),
+      listPendingSuuntoImports(user.id),
+    ]);
+    revalidateSuuntoPaths(result.dive.id);
+    return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
+  } catch (error) {
+    console.error("Suunto import merge failed", error);
     return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
   }
 }

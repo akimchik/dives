@@ -208,3 +208,6 @@ continue. It looks like working now. But for the last 10 days it says: Checked 0
 
 ## 2026-09-06 15:37 CEST — Add Suunto Sidecar Logs
 Add logs to suunto-sidecar
+
+## 2026-09-06 16:01 CEST — Improve Suunto Import Fields And Merge
+It loads dives now. Let's improve: let's find out why dive site location is not available in suunto workout, and also no avg depth and bottom time, and now end pressure, also let's norm 'Air 21% O₂' to just 'Air'. Also let's add an optional merge into existing dive (button opens a dialog where to choose existing dive, preselect by date) -- and follow the same strategy as with merging dive sites.

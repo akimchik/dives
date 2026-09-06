@@ -8,6 +8,7 @@ import { DeleteSuuntoImportButton } from "@/components/delete-suunto-import-butt
 import { DiveForm } from "@/components/dive-form";
 import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
 import { Card, CardContent } from "@/components/ui/card";
+import { listSuuntoMergeDiveCandidates } from "@/lib/dives";
 import { getPendingSuuntoImport } from "@/lib/suunto/imports";
 import { requireUser } from "@/lib/session";
 
@@ -24,6 +25,8 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
 
   const pending = await getPendingSuuntoImport(user.id, importId);
   if (!pending || pending.id !== importId) notFound();
+
+  const mergeCandidates = await listSuuntoMergeDiveCandidates(user.id, pending.workout_started_at);
 
   return (
     <AppShell email={user.email}>
@@ -61,6 +64,14 @@ export default async function ReviewSuuntoImportPage({ params }: { params: Promi
           suuntoImportId={pending.id}
           cancelHref="/settings/integrations"
           submitLabel="Save Suunto dive"
+          suuntoMergeCandidates={mergeCandidates.map((dive) => ({
+            id: dive.id,
+            title: dive.title,
+            occurredAt: dive.occurred_at.toISOString(),
+            maxDepth: dive.max_depth,
+            bottomTimeMinutes: dive.bottom_time_minutes,
+            siteName: dive.site_name,
+          }))}
         />
       </div>
     </AppShell>

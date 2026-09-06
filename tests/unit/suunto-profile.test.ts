@@ -82,7 +82,7 @@ describe("compileSuuntoDiveProfile", () => {
     expect(result.profile.tankStartPressure).toBe(184.6);
     expect(result.profile.tankEndPressure).toBe(94.1);
     expect(result.profile.tankSizeLitres).toBe(14);
-    expect(result.profile.gasMix).toBe("Air 21% O₂");
+    expect(result.profile.gasMix).toBe("Air");
     expect(result.profile.points.at(-1)).toMatchObject({ depth: 5.1, tankPressure: 94.1, gasConsumption: 90.5 });
     expect(result.profile.depthProfile).toEqual([
       { time: 0, depth: 1.42 },
@@ -96,6 +96,43 @@ describe("compileSuuntoDiveProfile", () => {
       startPressure: 184.6,
       endPressure: 94.1,
       cylinderSize: 14,
+    });
+  });
+
+  it("combines split summary rows and surfaces Suunto GPS coordinates", () => {
+    const result = compileSuuntoDiveProfile("split", {
+      Data: fixture.Data,
+      Summary: {
+        Samples: [
+          { Attributes: { "suunto/sml": { DiveHeader: { Gases: [{ Oxygen: 21, TankFillPressure: 23200000, TankSize: 0.014 }] } } } },
+          {
+            Attributes: {
+              "suunto/sml": {
+                DiveFooter: {
+                  Gases: [{ StartPressure: 18460938, EndPressure: 9410938 }],
+                  LastKnownCoordinates: { Latitude: 0.9031027318196329, Longitude: 0.0678412674202727 },
+                },
+              },
+            },
+          },
+          { Attributes: { "suunto/sml": { Windows: [{ Type: "Dive", DiveTime: 3218.8, Depth: [{ Avg: 2.32, Max: 8.82 }] }] } } },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.profile.averageDepth).toBe(2.32);
+    expect(result.profile.durationMinutes).toBe(53.6);
+    expect(result.profile.tankEndPressure).toBe(94.1);
+    expect(result.profile.gasMix).toBe("Air");
+    expect(result.profile.location).toEqual({ lat: 51.743975, lng: 3.887018 });
+    expect(result.draftDive.site).toMatchObject({
+      name: "Suunto GPS 51.7440, 3.8870",
+      location: "51.743975, 3.887018",
+      lat: 51.743975,
+      lng: 3.887018,
     });
   });
 

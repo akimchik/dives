@@ -528,9 +528,42 @@ export async function getDive(userId: string, diveId: number): Promise<DiveRecor
   return result.rows[0] ?? null;
 }
 
+export async function listSuuntoMergeDiveCandidates(
+  userId: string,
+  preferredAt: Date | string | null,
+): Promise<SuuntoMergeDiveCandidate[]> {
+  const preferred = preferredAt ? new Date(preferredAt) : null;
+  const result = await queryRead<SuuntoMergeDiveCandidate>(
+    `
+      select d.id, d.title, d.occurred_at, d.max_depth, d.bottom_time_minutes, s.name as site_name
+      ${diveFrom}
+      where d.user_id = $1
+        and d.suunto_workout_key is null
+      order by
+        case when $2::timestamptz is null then 1 else 0 end,
+        case when $2::timestamptz is null then null else abs(extract(epoch from (d.occurred_at - $2::timestamptz))) end asc,
+        d.occurred_at desc,
+        d.id desc
+      limit 25
+    `,
+    [userId, preferred && Number.isFinite(preferred.getTime()) ? preferred : null],
+  );
+
+  return result.rows;
+}
+
 export type RecentCylinder = {
   tankInfo: string | null;
   cylinderSize: string | null;
+};
+
+export type SuuntoMergeDiveCandidate = {
+  id: number;
+  title: string | null;
+  occurred_at: Date;
+  max_depth: string | null;
+  bottom_time_minutes: number | null;
+  site_name: string | null;
 };
 
 // The form's optional "recent cylinder" picker: the user's last 5 distinct (tank_info,
@@ -856,6 +889,10 @@ export type CreateDiveFromSuuntoImportResult =
   | { inserted: false; reason: "missing_import" | "already_saved" }
   | { inserted: true; dive: DiveSnapshot };
 
+export type MergeSuuntoImportIntoDiveResult =
+  | { merged: false; reason: "missing_import" | "missing_dive" | "already_saved" }
+  | { merged: true; dive: DiveSnapshot };
+
 // Human-reviewed save path for staged Suunto imports. It is deliberately separate from
 // createDive()/updateDive(): Suunto provenance/profile/bundle columns are write-once here and never
 // touched by ordinary manual edits, preserving the source identity needed for exact workout-key
@@ -933,6 +970,141 @@ export async function createDiveFromSuuntoImport(
     await enqueueDiveBackup(client, owner, "create", snapshot);
 
     return { inserted: true, dive: snapshot };
+  });
+}
+
+export async function mergeSuuntoImportIntoDive(
+  owner: DiveOwner,
+  suuntoImportId: number,
+  targetDiveId: number,
+  input: DiveInput,
+): Promise<MergeSuuntoImportIntoDiveResult> {
+  return inTransaction(async (client) => {
+    const source = await client.query<{
+      workout_key: string;
+      compiled_profile: unknown;
+      original_bundle: Buffer;
+    }>(
+      `
+        select workout_key, compiled_profile, original_bundle
+        from suunto_imports
+        where id = $1
+          and user_id = $2
+        for update
+      `,
+      [suuntoImportId, owner.id],
+    );
+
+    const row = source.rows[0];
+    if (!row) return { merged: false, reason: "missing_import" };
+
+    const target = await client.query<{ suunto_workout_key: string | null }>(
+      `
+        select suunto_workout_key
+        from dives
+        where id = $1
+          and user_id = $2
+        for update
+      `,
+      [targetDiveId, owner.id],
+    );
+
+    if (!target.rows[0]) return { merged: false, reason: "missing_dive" };
+    if (target.rows[0].suunto_workout_key && target.rows[0].suunto_workout_key !== row.workout_key) {
+      return { merged: false, reason: "already_saved" };
+    }
+
+    const duplicate = await client.query<{ exists: boolean }>(
+      `
+        select exists(
+          select 1 from dives
+          where user_id = $1
+            and suunto_workout_key = $2
+            and id <> $3
+        ) as exists
+      `,
+      [owner.id, row.workout_key, targetDiveId],
+    );
+
+    if (duplicate.rows[0]?.exists) {
+      await client.query("delete from suunto_imports where id = $1 and user_id = $2", [
+        suuntoImportId,
+        owner.id,
+      ]);
+      return { merged: false, reason: "already_saved" };
+    }
+
+    const diveSiteId = await resolveDiveSiteId(client, owner.id, input.site);
+
+    const updated = await client.query(
+      `
+        update dives set
+          dive_site_id = $3,
+          title = $4,
+          occurred_at = $5,
+          max_depth = $6,
+          avg_depth = $7,
+          bottom_time_minutes = $8,
+          water_temp = $9,
+          water_temp_low = $10,
+          air_temp = $11,
+          visibility = $12,
+          gas_mix = $13,
+          tank_info = $14,
+          cylinder_size = $15,
+          start_pressure = $16,
+          end_pressure = $17,
+          weight = $18,
+          weight_feedback = $19,
+          suit_type = $20,
+          hood = $21,
+          gloves = $22,
+          boots = $23,
+          buddy = $24,
+          dive_shop = $25,
+          current = $26,
+          surge = $27,
+          waves = $28,
+          weather = $29,
+          water_type = $30,
+          body_of_water = $31,
+          entry_type = $32,
+          notes = $33,
+          rating = $34,
+          depth_profile = $35,
+          depth_profile_raw = $36,
+          suunto_workout_key = $37,
+          suunto_profile = $38::jsonb,
+          suunto_original_bundle = $39,
+          padi_needs_update = case
+            when padi_dive_id is not null and log_type = 'Recreational' and log_course is null then true
+            else padi_needs_update
+          end,
+          updated_at = now()
+        where id = $1
+          and user_id = $2
+      `,
+      [
+        targetDiveId,
+        owner.id,
+        ...diveValues(diveSiteId, input),
+        row.workout_key,
+        JSON.stringify(row.compiled_profile),
+        row.original_bundle,
+      ],
+    );
+
+    if (updated.rowCount === 0) return { merged: false, reason: "missing_dive" };
+
+    await client.query("delete from suunto_imports where id = $1 and user_id = $2", [
+      suuntoImportId,
+      owner.id,
+    ]);
+
+    const snapshot = await loadSnapshot(client, owner.id, targetDiveId);
+    await enqueueDiveBackup(client, owner, "edit", snapshot);
+
+    return { merged: true, dive: snapshot };
   });
 }
 

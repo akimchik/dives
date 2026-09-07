@@ -26,8 +26,9 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if .Values.migration.enabled }}
+      {{- if or .Values.migration.enabled .Values.backfills.enabled }}
       initContainers:
+      {{- if .Values.migration.enabled }}
         - name: migration
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }} # Microk8s private registry exposed on localhost:32000.
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -58,6 +59,39 @@ spec:
                 secretKeyRef:
                   name: {{ required "database.secretName is required" .Values.database.secretName | quote }}
                   key: {{ .Values.database.passwordKey | quote }}
+      {{- end }}
+      {{- if .Values.backfills.enabled }}
+        - name: backfills
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node"]
+          args: ["scripts/run-backfills.mjs"]
+          env:
+          {{- range $key, $value := .Values.env }}
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
+          {{- end }}
+          {{- range $key, $_ := .Values.appSecrets }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: "{{ $.Release.Name }}-app-secrets"
+                  key: {{ $key | quote }}
+          {{- end }}
+            # Data-only rewrites, never DDL -- runs as the same restricted app role as the app
+            # container itself (.Values.databaseApp), not the schema-owner role the migration
+            # initContainer above uses.
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "databaseApp.secretName is required" .Values.databaseApp.secretName | quote }}
+                  key: {{ .Values.databaseApp.usernameKey | quote }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "databaseApp.secretName is required" .Values.databaseApp.secretName | quote }}
+                  key: {{ .Values.databaseApp.passwordKey | quote }}
+      {{- end }}
       {{- end }}
       containers:
         - name: app

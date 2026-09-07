@@ -79,14 +79,14 @@ databaseApp:
 migration:
   enabled: true
 
-# One-off Job for issue #20 (scripts/backfill-padi-enums.mjs): rewrites PADI-imported dives'
-# waves/current/surge/suit_type/weight_feedback columns from PADI's raw enum codes to this app's own
-# vocabulary. Off by default -- flip to true for exactly one deploy to run it, then leave it: the
-# Job's name has no per-deploy suffix, so once it exists and its spec is unchanged, later deploys
-# just no-op-reconcile the same completed Job rather than re-running the script (it's idempotent
-# either way, but this avoids the wasted round trips of re-running it on every future deploy).
-padiBackfillEnums:
-  enabled: false
+# Runs scripts/run-backfills.mjs (every module under scripts/backfills/, e.g. issue #20's
+# padi-enums.mjs) as a Deployment initContainer, right after the migration one -- every future
+# deploy, not a one-shot Job. Each backfill module is required to be idempotent (see
+# scripts/run-backfills.mjs's contract), so rerunning them forever is cheap once their real work is
+# done, and adding a new backfill later needs no Helm change at all -- just a new file under
+# scripts/backfills/.
+backfills:
+  enabled: true
 
 notifications:
   schedule: "*/2 * * * *"

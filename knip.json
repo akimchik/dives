@@ -3,6 +3,7 @@
     "components/**",
     "scripts/env.d.mts",
     "scripts/padi/crypto.d.mts",
-    "scripts/padi/client.d.mts"
+    "scripts/padi/client.d.mts",
+    "scripts/backfills/**"
   ]
 }

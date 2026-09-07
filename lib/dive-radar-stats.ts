@@ -1,6 +1,11 @@
-// Feeds the dashboard's "seasonality" radar charts (issue #7): one shape per property, angle axis
-// = calendar month, aggregated across every year the user has logged (a January dive from 2023 and
-// one from 2026 land in the same bucket -- this is a seasonality view, not a timeline).
+// Feeds the dashboard's radar charts (issue #7 + follow-up corrections): two groups, each its own
+// collapsible section on the dashboard --
+//
+// - "seasonality": angle axis = calendar month, aggregated across every year the user has logged (a
+//   January dive from 2023 and one from 2026 land in the same bucket -- this is a seasonality view,
+//   not a timeline).
+// - "distributions": angle axis = a value range (numeric properties bucketed into fixed-size steps)
+//   or a value itself (the three ordinal intensity fields), radius = how many dives fall in it.
 
 import type { DiveRecord } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
@@ -23,23 +28,36 @@ const MONTH_LABELS = [
 // Matches dive-form.tsx's INTENSITIES order -- kept as a separate constant here rather than
 // importing from that (client) component, since this module is also used server-side and in tests.
 const INTENSITY_ORDER = ["None", "Mild", "Moderate", "Strong"];
-const MAX_INTENSITY_SCORE = INTENSITY_ORDER.length - 1;
-const MAX_RATING = 5;
 
 type MonthlyRadarPoint = { month: string; value: number | null };
+type MonthlyMinMaxAvgPoint = { month: string; min: number | null; max: number | null; avg: number | null };
 type WaterTempRadarPoint = { month: string; high: number | null; low: number | null };
-type ConditionsRadarPoint = { metric: string; value: number | null; raw: string | null };
+type BucketPoint = { bucket: string; count: number };
+type IntensityPoint = { level: string; count: number };
 
 type MonthlyRadarSeries = { data: MonthlyRadarPoint[]; domain: [number, number] };
+type MonthlyMinMaxAvgSeries = { data: MonthlyMinMaxAvgPoint[]; domain: [number, number] };
+type BucketSeries = { data: BucketPoint[]; domain: [number, number] };
+type IntensitySeries = { data: IntensityPoint[]; domain: [number, number] };
 
 export type DiveRadarStats = {
-  divesPerMonth: MonthlyRadarSeries;
-  depthPerMonth: MonthlyRadarSeries;
-  durationPerMonth: MonthlyRadarSeries;
-  visibilityPerMonth: MonthlyRadarSeries;
-  waterTempPerMonth: { data: WaterTempRadarPoint[]; domain: [number, number] };
-  sacRatePerMonth: MonthlyRadarSeries;
-  conditions: { data: ConditionsRadarPoint[]; domain: [number, number] };
+  seasonality: {
+    divesPerMonth: MonthlyRadarSeries;
+    depthPerMonth: MonthlyRadarSeries;
+    durationPerMonth: MonthlyRadarSeries;
+    visibilityPerMonth: MonthlyMinMaxAvgSeries;
+    waterTempPerMonth: { data: WaterTempRadarPoint[]; domain: [number, number] };
+    sacRatePerMonth: MonthlyMinMaxAvgSeries;
+  };
+  distributions: {
+    depth: BucketSeries;
+    duration: BucketSeries;
+    visibility: BucketSeries;
+    sacRate: BucketSeries;
+    waves: IntensitySeries;
+    surge: IntensitySeries;
+    current: IntensitySeries;
+  };
 };
 
 // numeric(_, _) columns come back from `pg` as strings; bottom_time_minutes is a plain integer
@@ -56,7 +74,7 @@ function average(values: number[]): number | null {
 }
 
 // +10% headroom so the outermost data point never touches the radar's rim -- matches issue #7's
-// "0..{max+10%}" spec for depth/SAC rate, extended to visibility/water-temp for the same reason.
+// "0..{max+10%}" spec for depth/SAC rate, extended to every other magnitude chart for the same reason.
 function withHeadroom(max: number): [number, number] {
   return [0, max > 0 ? max * 1.1 : 1];
 }
@@ -85,6 +103,27 @@ function monthlySeries(
   return { data, values };
 }
 
+function monthlyMinMaxAvgSeries(
+  byMonth: DiveRecord[][],
+  extract: (dive: DiveRecord) => number | null,
+): { data: MonthlyMinMaxAvgPoint[]; values: number[] } {
+  const data: MonthlyMinMaxAvgPoint[] = [];
+  const values: number[] = [];
+
+  byMonth.forEach((group, index) => {
+    const monthValues = group.map(extract).filter((value): value is number => value !== null);
+    data.push({
+      month: MONTH_LABELS[index],
+      min: monthValues.length ? Math.min(...monthValues) : null,
+      max: monthValues.length ? Math.max(...monthValues) : null,
+      avg: average(monthValues),
+    });
+    values.push(...monthValues);
+  });
+
+  return { data, values };
+}
+
 function diveSacRate(dive: DiveRecord): number | null {
   const result = computeGasConsumption({
     startPressure: toNumber(dive.start_pressure),
@@ -96,10 +135,38 @@ function diveSacRate(dive: DiveRecord): number | null {
   return result?.sacRateLitersPerMin ?? null;
 }
 
-function intensityScore(value: string | null): number | null {
-  if (value === null) return null;
-  const index = INTENSITY_ORDER.indexOf(value);
-  return index === -1 ? null : index;
+// Buckets a numeric property into fixed-size steps (e.g. depth in 5m steps: "0", "5", "10", ...),
+// one bucket per `step` up to whichever bucket the largest observed value falls into. Each bucket's
+// label is its lower bound, and its radius is how many dives landed in [label, label+step).
+function numericDistribution(dives: DiveRecord[], extract: (dive: DiveRecord) => number | null, step: number): BucketSeries {
+  const values = dives.map(extract).filter((value): value is number => value !== null && value >= 0);
+
+  if (values.length === 0) {
+    return { data: [{ bucket: "0", count: 0 }], domain: withHeadroom(0) };
+  }
+
+  const bucketCount = Math.floor(Math.max(...values) / step) + 1;
+  const counts = Array.from({ length: bucketCount }, () => 0);
+  for (const value of values) {
+    counts[Math.min(bucketCount - 1, Math.floor(value / step))] += 1;
+  }
+
+  return {
+    data: counts.map((count, index) => ({ bucket: String(index * step), count })),
+    domain: withHeadroom(Math.max(...counts)),
+  };
+}
+
+// One bucket per ordinal level (None/Mild/Moderate/Strong), radius = how many dives recorded that
+// exact value. Dives that never recorded the field are excluded rather than folded into "None" --
+// "not recorded" and "recorded as none" are different facts.
+function intensityDistribution(dives: DiveRecord[], extract: (dive: DiveRecord) => string | null): IntensitySeries {
+  const counts = INTENSITY_ORDER.map((level) => ({
+    level,
+    count: dives.filter((dive) => extract(dive) === level).length,
+  }));
+
+  return { data: counts, domain: withHeadroom(Math.max(...counts.map((point) => point.count))) };
 }
 
 export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
@@ -113,10 +180,10 @@ export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
 
   const depth = monthlySeries(byMonth, (dive) => toNumber(dive.max_depth));
   const duration = monthlySeries(byMonth, (dive) => dive.bottom_time_minutes);
-  const visibility = monthlySeries(byMonth, (dive) => toNumber(dive.visibility));
+  const visibility = monthlyMinMaxAvgSeries(byMonth, (dive) => toNumber(dive.visibility));
   const waterTempHigh = monthlySeries(byMonth, (dive) => toNumber(dive.water_temp));
   const waterTempLow = monthlySeries(byMonth, (dive) => toNumber(dive.water_temp_low));
-  const sacRate = monthlySeries(byMonth, diveSacRate);
+  const sacRate = monthlyMinMaxAvgSeries(byMonth, diveSacRate);
 
   const waterTempData: WaterTempRadarPoint[] = MONTH_LABELS.map((month, index) => ({
     month,
@@ -125,48 +192,27 @@ export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
   }));
   const waterTempMax = Math.max(0, ...waterTempHigh.values, ...waterTempLow.values);
 
-  // "Conditions & company" props, excluding buddy/dive shop (identity, not a magnitude) and site
-  // coordinates (not part of that card). Weather/water type/body of water are also left out: they're
-  // nominal categories (a name, not an amount), so there's no meaningful position for them on a
-  // radius axis. What's left -- current/surge/waves (ordinal intensity), air temp and rating -- each
-  // gets normalised to a 0-100% share of its own scale so five different units can share one radius.
-  const currentScores = dives.map((d) => intensityScore(d.current)).filter((v): v is number => v !== null);
-  const surgeScores = dives.map((d) => intensityScore(d.surge)).filter((v): v is number => v !== null);
-  const wavesScores = dives.map((d) => intensityScore(d.waves)).filter((v): v is number => v !== null);
-  const ratings = dives.map((d) => d.rating).filter((v): v is number => v !== null);
-  const airTemps = dives
-    .map((d) => toNumber(d.air_temp))
-    .filter((v): v is number => v !== null);
-  const airTempMax = Math.max(0, ...airTemps);
-
-  const avgCurrent = average(currentScores);
-  const avgSurge = average(surgeScores);
-  const avgWaves = average(wavesScores);
-  const avgRating = average(ratings);
-  const avgAirTemp = average(airTemps);
-
-  const pctOf = (value: number | null, max: number): number | null =>
-    value === null || max <= 0 ? null : (value / max) * 100;
-
-  const conditions: ConditionsRadarPoint[] = [
-    { metric: "Current", value: pctOf(avgCurrent, MAX_INTENSITY_SCORE), raw: avgCurrent === null ? null : INTENSITY_ORDER[Math.round(avgCurrent)] },
-    { metric: "Surge", value: pctOf(avgSurge, MAX_INTENSITY_SCORE), raw: avgSurge === null ? null : INTENSITY_ORDER[Math.round(avgSurge)] },
-    { metric: "Waves", value: pctOf(avgWaves, MAX_INTENSITY_SCORE), raw: avgWaves === null ? null : INTENSITY_ORDER[Math.round(avgWaves)] },
-    { metric: "Air temp", value: pctOf(avgAirTemp, airTempMax), raw: avgAirTemp === null ? null : `${avgAirTemp.toFixed(1)}°C` },
-    { metric: "Rating", value: pctOf(avgRating, MAX_RATING), raw: avgRating === null ? null : `${avgRating.toFixed(1)}/5` },
-  ];
-
   return {
-    divesPerMonth: { data: divesPerMonth, domain: withHeadroom(divesPerMonthMax) },
-    depthPerMonth: { data: depth.data, domain: withHeadroom(Math.max(0, ...depth.values)) },
-    // Issue #7's explicit duration scale: 5 minutes .. longest dive + 15 minutes.
-    durationPerMonth: {
-      data: duration.data,
-      domain: [5, Math.max(5, ...duration.values) + 15],
+    seasonality: {
+      divesPerMonth: { data: divesPerMonth, domain: withHeadroom(divesPerMonthMax) },
+      depthPerMonth: { data: depth.data, domain: withHeadroom(Math.max(0, ...depth.values)) },
+      // Issue #7's explicit duration scale: 5 minutes .. longest dive + 15 minutes.
+      durationPerMonth: {
+        data: duration.data,
+        domain: [5, Math.max(5, ...duration.values) + 15],
+      },
+      visibilityPerMonth: { data: visibility.data, domain: withHeadroom(Math.max(0, ...visibility.values)) },
+      waterTempPerMonth: { data: waterTempData, domain: withHeadroom(waterTempMax) },
+      sacRatePerMonth: { data: sacRate.data, domain: withHeadroom(Math.max(0, ...sacRate.values)) },
     },
-    visibilityPerMonth: { data: visibility.data, domain: withHeadroom(Math.max(0, ...visibility.values)) },
-    waterTempPerMonth: { data: waterTempData, domain: withHeadroom(waterTempMax) },
-    sacRatePerMonth: { data: sacRate.data, domain: withHeadroom(Math.max(0, ...sacRate.values)) },
-    conditions: { data: conditions, domain: [0, 100] },
+    distributions: {
+      depth: numericDistribution(dives, (dive) => toNumber(dive.max_depth), 5),
+      duration: numericDistribution(dives, (dive) => dive.bottom_time_minutes, 10),
+      visibility: numericDistribution(dives, (dive) => toNumber(dive.visibility), 5),
+      sacRate: numericDistribution(dives, diveSacRate, 5),
+      waves: intensityDistribution(dives, (dive) => dive.waves),
+      surge: intensityDistribution(dives, (dive) => dive.surge),
+      current: intensityDistribution(dives, (dive) => dive.current),
+    },
   };
 }

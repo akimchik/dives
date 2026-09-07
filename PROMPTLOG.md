@@ -512,3 +512,36 @@ axis, not a bug. Added `tests/unit/dive-radar-stats.test.ts` (9 cases) and two a
 pattern; visible with real testids once a dive exists). Updated `docs/development.md` with the
 scaling/normalisation decisions. Full suite green: typecheck, lint, `knip`, unit (125/125), full
 WebKit e2e (23/23).
+
+## 2026-09-07 — Radar chart corrections (issue #7 follow-up)
+
+> Need corrections:
+> 1. SAC rate by month: make multi with min max and avg
+> 2. Put all charts of Seasonality into a collapsible element.
+> 3. Add charts not `by month` but `by range` (into another collapsible element): showing for ex. amount of dives per depth with axis being [0, 5, 10, 15, 20, 25, 30, 35], etc for other props.
+> 4. Conditions & company: replace with separate charts for Waves, Surge, Current -- each showing # of dives per value.
+> 5. Visibility by month should show min,max,avg
+
+Restructured `lib/dive-radar-stats.ts`'s `DiveRadarStats` into two groups
+(`seasonality`, `distributions`) matching two new `RadarSection` collapsibles
+in `components/dive-radar-charts.tsx` (built on the already-existing
+`components/ui/collapsible.tsx`, both open by default). Visibility and SAC
+rate became three-series min/max/avg radars (`monthlyMinMaxAvgSeries`). The
+single "Conditions & company" radar (a normalised-percentage compromise from
+the original build, since current/surge/waves/air-temp/rating don't share
+units) is gone; added `numericDistribution` (fixed-size buckets — 5m depth,
+10min duration, 5m visibility, 5 L/min SAC rate — labelled by each bucket's
+lower bound, matching the user's `[0, 5, 10, ...]` example) and
+`intensityDistribution` (exact-value counts for current/surge/waves only, per
+the correction -- air temp and rating were dropped from this dashboard
+entirely rather than carried over) for the new Distributions section.
+
+Caught a real rendering bug via a manual seeded-data screenshot before
+calling this done: the default recharts radar `outerRadius` (~80%) left too
+little margin for the new longer angle-axis labels ("Moderate", "Strong"),
+clipping them against the card edge ("Strong" rendered as "rong"). Fixed with
+`outerRadius="62%"` plus wider chart margins on every card. Rewrote
+`tests/unit/dive-radar-stats.test.ts` for the new grouped shape (14 cases) and
+`tests/e2e/dives.spec.ts`'s radar test to check both collapsible sections
+independently (collapsing one leaves the other's charts visible). Full suite
+green: typecheck, lint, `knip`, unit (131/131), full WebKit e2e (23/23).

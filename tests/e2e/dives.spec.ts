@@ -316,19 +316,28 @@ test.describe("dive logbook", () => {
     await expect(page.getByRole("img", { name: /dive activity over the last year: 1 dive logged/i })).toBeVisible();
   });
 
-  test("dashboard shows seasonality radar charts once a dive is logged", async ({ page }) => {
+  test("dashboard shows radar charts once a dive is logged", async ({ page }) => {
     const email = uniqueTestEmail("radar-charts");
     await registerViaMagicLink(page, email, PASSWORD);
 
-    // Seeded directly (see seedDive's own comment): this test only cares that the radar section
-    // renders real DB-backed data, not about exercising the create form again.
+    // Seeded directly (see seedDive's own comment): this test only cares that the radar sections
+    // render real DB-backed data, not about exercising the create form again.
     await seedDive(email, { title: "Radar Check", occurredAt: "2026-06-10T09:00:00Z", maxDepth: 22 });
 
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Seasonality" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Seasonality" })).toBeVisible();
     await expect(page.getByTestId("radar-dives-per-month")).toBeVisible();
     await expect(page.getByTestId("radar-depth-per-month")).toBeVisible();
     await expect(page.getByTestId("radar-water-temp-per-month")).toBeVisible();
-    await expect(page.getByTestId("radar-conditions")).toBeVisible();
+
+    // "Distributions" is a separate collapsible section, open by default alongside "Seasonality".
+    await expect(page.getByRole("button", { name: "Distributions" })).toBeVisible();
+    await expect(page.getByTestId("radar-distribution-depth")).toBeVisible();
+    await expect(page.getByTestId("radar-distribution-current")).toBeVisible();
+
+    // Collapsing "Distributions" hides its charts without touching "Seasonality".
+    await page.getByRole("button", { name: "Distributions" }).click();
+    await expect(page.getByTestId("radar-distribution-depth")).not.toBeVisible();
+    await expect(page.getByTestId("radar-dives-per-month")).toBeVisible();
   });
 });

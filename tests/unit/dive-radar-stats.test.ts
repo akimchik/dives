@@ -66,14 +66,14 @@ function makeDive(overrides: Partial<DiveRecord>): DiveRecord {
   };
 }
 
-describe("buildDiveRadarStats", () => {
+describe("buildDiveRadarStats — seasonality", () => {
   it("returns twelve zeroed months and a domain of [0, 1] when there are no dives", () => {
     const stats = buildDiveRadarStats([]);
 
-    expect(stats.divesPerMonth.data).toHaveLength(12);
-    expect(stats.divesPerMonth.data.every((point) => point.value === 0)).toBe(true);
-    expect(stats.divesPerMonth.domain).toEqual([0, 1]);
-    expect(stats.depthPerMonth.data.every((point) => point.value === null)).toBe(true);
+    expect(stats.seasonality.divesPerMonth.data).toHaveLength(12);
+    expect(stats.seasonality.divesPerMonth.data.every((point) => point.value === 0)).toBe(true);
+    expect(stats.seasonality.divesPerMonth.domain).toEqual([0, 1]);
+    expect(stats.seasonality.depthPerMonth.data.every((point) => point.value === null)).toBe(true);
   });
 
   it("buckets dives by calendar month regardless of year", () => {
@@ -83,9 +83,9 @@ describe("buildDiveRadarStats", () => {
       makeDive({ occurred_at: new Date("2026-07-01T00:00:00Z") }),
     ]);
 
-    const march = stats.divesPerMonth.data.find((point) => point.month === "Mar")!;
-    const july = stats.divesPerMonth.data.find((point) => point.month === "Jul")!;
-    const jan = stats.divesPerMonth.data.find((point) => point.month === "Jan")!;
+    const march = stats.seasonality.divesPerMonth.data.find((point) => point.month === "Mar")!;
+    const july = stats.seasonality.divesPerMonth.data.find((point) => point.month === "Jul")!;
+    const jan = stats.seasonality.divesPerMonth.data.find((point) => point.month === "Jan")!;
 
     expect(march.value).toBe(2);
     expect(july.value).toBe(1);
@@ -98,9 +98,9 @@ describe("buildDiveRadarStats", () => {
       makeDive({ occurred_at: new Date("2026-01-20T00:00:00Z"), max_depth: "30" }),
     ]);
 
-    const jan = stats.depthPerMonth.data.find((point) => point.month === "Jan")!;
+    const jan = stats.seasonality.depthPerMonth.data.find((point) => point.month === "Jan")!;
     expect(jan.value).toBeCloseTo(25, 5);
-    expect(stats.depthPerMonth.domain).toEqual([0, 30 * 1.1]);
+    expect(stats.seasonality.depthPerMonth.domain).toEqual([0, 30 * 1.1]);
   });
 
   it("scales duration as 5 minutes .. longest dive + 15 minutes, per issue #7", () => {
@@ -108,15 +108,33 @@ describe("buildDiveRadarStats", () => {
       makeDive({ occurred_at: new Date("2026-05-01T00:00:00Z"), bottom_time_minutes: 45 }),
     ]);
 
-    expect(stats.durationPerMonth.domain).toEqual([5, 60]);
+    expect(stats.seasonality.durationPerMonth.domain).toEqual([5, 60]);
   });
 
   it("floors the duration domain at 5 minutes even with no dives", () => {
     const stats = buildDiveRadarStats([]);
-    expect(stats.durationPerMonth.domain).toEqual([5, 20]);
+    expect(stats.seasonality.durationPerMonth.domain).toEqual([5, 20]);
   });
 
-  it("computes SAC rate per dive before averaging by month", () => {
+  it("reports min/max/avg per month for visibility and SAC rate", () => {
+    const stats = buildDiveRadarStats([
+      makeDive({ occurred_at: new Date("2026-02-01T00:00:00Z"), visibility: "10" }),
+      makeDive({ occurred_at: new Date("2026-02-15T00:00:00Z"), visibility: "20" }),
+    ]);
+
+    const feb = stats.seasonality.visibilityPerMonth.data.find((point) => point.month === "Feb")!;
+    expect(feb.min).toBe(10);
+    expect(feb.max).toBe(20);
+    expect(feb.avg).toBeCloseTo(15, 5);
+
+    // Never recorded -- min/max/avg all null, not zeroed.
+    const jan = stats.seasonality.visibilityPerMonth.data.find((point) => point.month === "Jan")!;
+    expect(jan.min).toBeNull();
+    expect(jan.max).toBeNull();
+    expect(jan.avg).toBeNull();
+  });
+
+  it("computes SAC rate per dive before taking the monthly min/max/avg", () => {
     // 200 -> 50 bar on a 12L cylinder at 18m avg depth for 40 min => 16.0714 L/min (see
     // gas-consumption.test.ts for the same worked example).
     const stats = buildDiveRadarStats([
@@ -130,8 +148,10 @@ describe("buildDiveRadarStats", () => {
       }),
     ]);
 
-    const feb = stats.sacRatePerMonth.data.find((point) => point.month === "Feb")!;
-    expect(feb.value).toBeCloseTo(16.0714, 3);
+    const feb = stats.seasonality.sacRatePerMonth.data.find((point) => point.month === "Feb")!;
+    expect(feb.avg).toBeCloseTo(16.0714, 3);
+    expect(feb.min).toBeCloseTo(16.0714, 3);
+    expect(feb.max).toBeCloseTo(16.0714, 3);
   });
 
   it("pairs high and low water temperature series by month", () => {
@@ -143,31 +163,10 @@ describe("buildDiveRadarStats", () => {
       }),
     ]);
 
-    const aug = stats.waterTempPerMonth.data.find((point) => point.month === "Aug")!;
+    const aug = stats.seasonality.waterTempPerMonth.data.find((point) => point.month === "Aug")!;
     expect(aug.high).toBe(28);
     expect(aug.low).toBe(24);
-    expect(stats.waterTempPerMonth.domain).toEqual([0, 28 * 1.1]);
-  });
-
-  it("normalises conditions to a 0-100 share of each metric's own scale", () => {
-    const stats = buildDiveRadarStats([
-      makeDive({ current: "Strong", surge: "None", rating: 5, air_temp: "20" }),
-      makeDive({ current: "Strong", surge: "Moderate", rating: 3, air_temp: "30" }),
-    ]);
-
-    const byMetric = Object.fromEntries(stats.conditions.data.map((point) => [point.metric, point]));
-
-    // Strong (index 3) both times -> 100% of the 0..3 intensity scale.
-    expect(byMetric["Current"].value).toBeCloseTo(100, 5);
-    // None (0) and Moderate (2) average to 1, i.e. 1/3 of the scale.
-    expect(byMetric["Surge"].value).toBeCloseTo((1 / 3) * 100, 5);
-    // Rating averages to 4/5 = 80%.
-    expect(byMetric["Rating"].value).toBeCloseTo(80, 5);
-    // Air temp is normalised against its own observed max (30), so the average (25) is ~83.3%.
-    expect(byMetric["Air temp"].value).toBeCloseTo((25 / 30) * 100, 3);
-    // Waves was never recorded on either dive.
-    expect(byMetric["Waves"].value).toBeNull();
-    expect(stats.conditions.domain).toEqual([0, 100]);
+    expect(stats.seasonality.waterTempPerMonth.domain).toEqual([0, 28 * 1.1]);
   });
 
   it("ignores dives that never recorded a given property instead of treating them as zero", () => {
@@ -176,7 +175,80 @@ describe("buildDiveRadarStats", () => {
       makeDive({ occurred_at: new Date("2026-04-02T00:00:00Z"), max_depth: "18" }),
     ]);
 
-    const apr = stats.depthPerMonth.data.find((point) => point.month === "Apr")!;
+    const apr = stats.seasonality.depthPerMonth.data.find((point) => point.month === "Apr")!;
     expect(apr.value).toBe(18);
+  });
+});
+
+describe("buildDiveRadarStats — distributions", () => {
+  it("buckets depth into 5m steps, labelled by each bucket's lower bound", () => {
+    const stats = buildDiveRadarStats([
+      makeDive({ max_depth: "3" }),
+      makeDive({ max_depth: "12" }),
+      makeDive({ max_depth: "14" }),
+      makeDive({ max_depth: "31" }),
+    ]);
+
+    const byBucket = Object.fromEntries(stats.distributions.depth.data.map((p) => [p.bucket, p.count]));
+    expect(byBucket["0"]).toBe(1); // 3m
+    expect(byBucket["10"]).toBe(2); // 12m, 14m
+    expect(byBucket["30"]).toBe(1); // 31m
+    // Highest bucket is the one containing the largest value -- no empty trailing buckets.
+    expect(Math.max(...stats.distributions.depth.data.map((p) => Number(p.bucket)))).toBe(30);
+  });
+
+  it("buckets duration into 10-minute steps", () => {
+    const stats = buildDiveRadarStats([makeDive({ bottom_time_minutes: 25 }), makeDive({ bottom_time_minutes: 27 })]);
+    const byBucket = Object.fromEntries(stats.distributions.duration.data.map((p) => [p.bucket, p.count]));
+    expect(byBucket["20"]).toBe(2);
+  });
+
+  it("returns a single zeroed bucket when no dives have the property recorded", () => {
+    const stats = buildDiveRadarStats([makeDive({})]);
+    expect(stats.distributions.depth.data).toEqual([{ bucket: "0", count: 0 }]);
+    expect(stats.distributions.depth.domain).toEqual([0, 1]);
+  });
+
+  it("counts SAC rate distribution from the same per-dive computation as the monthly series", () => {
+    const stats = buildDiveRadarStats([
+      makeDive({
+        start_pressure: "200",
+        end_pressure: "50",
+        cylinder_size: "12",
+        avg_depth: "18",
+        bottom_time_minutes: 40,
+      }),
+    ]);
+
+    // 16.0714 L/min falls in the 15-20 bucket, labelled "15".
+    const byBucket = Object.fromEntries(stats.distributions.sacRate.data.map((p) => [p.bucket, p.count]));
+    expect(byBucket["15"]).toBe(1);
+  });
+
+  it("counts dives per exact intensity value for current/surge/waves", () => {
+    const stats = buildDiveRadarStats([
+      makeDive({ current: "Strong", surge: "None", waves: "Mild" }),
+      makeDive({ current: "Strong", surge: "Moderate", waves: null }),
+    ]);
+
+    const currentByLevel = Object.fromEntries(stats.distributions.current.data.map((p) => [p.level, p.count]));
+    expect(currentByLevel["Strong"]).toBe(2);
+    expect(currentByLevel["None"]).toBe(0);
+
+    const surgeByLevel = Object.fromEntries(stats.distributions.surge.data.map((p) => [p.level, p.count]));
+    expect(surgeByLevel["None"]).toBe(1);
+    expect(surgeByLevel["Moderate"]).toBe(1);
+
+    // The dive with waves: null is excluded entirely, not folded into "None".
+    const wavesByLevel = Object.fromEntries(stats.distributions.waves.data.map((p) => [p.level, p.count]));
+    expect(wavesByLevel["Mild"]).toBe(1);
+    expect(wavesByLevel["None"]).toBe(0);
+  });
+
+  it("always reports all four intensity levels even when none were recorded", () => {
+    const stats = buildDiveRadarStats([makeDive({})]);
+    expect(stats.distributions.waves.data.map((p) => p.level)).toEqual(["None", "Mild", "Moderate", "Strong"]);
+    expect(stats.distributions.waves.data.every((p) => p.count === 0)).toBe(true);
+    expect(stats.distributions.waves.domain).toEqual([0, 1]);
   });
 });

@@ -162,12 +162,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {dives.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium">Seasonality</h2>
-            <DiveRadarCharts stats={radarStats} />
-          </div>
-        ) : null}
+        {dives.length > 0 ? <DiveRadarCharts stats={radarStats} /> : null}
 
         {tagCloud.length > 0 ? (
           <Card>

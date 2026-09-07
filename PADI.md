@@ -164,6 +164,19 @@ passthrough pattern `entry_type` already used. `components/dive-form.tsx`'s `Cho
 when the stored value isn't one of the dropdown's known options and shows it as-is with a warning
 next to the selector, rather than silently blanking it (issue #20).
 
+Fixing the mapper only changes what *future* imports store — dives already imported before this fix
+keep the raw PADI codes in those 5 columns, and re-running "Sync from PADI" doesn't touch them either
+(sync only inserts dives that aren't linked yet). `scripts/backfill-padi-enums.mjs` rewrites already-
+imported rows to app format; it's a standalone `.mjs` (not importable from `lib/padi/enum-map.ts`,
+whose forward maps it mirrors by hand) because it's meant to run as
+`helm-charts/templates/padi-backfill-enums-job.yaml`, a one-shot `Job` gated behind
+`padiBackfillEnums.enabled` (off by default) inside the deployed container — the Docker image's
+runner stage copies `scripts/` and `migrations/` verbatim but not `lib/`, same constraint every other
+Postgres-talking script here (`db-migrate.mjs`, `notification-worker.mjs`) already works around by
+staying self-contained. Flip the flag to `true` for one deploy to run it; leave it there afterward
+(the Job's fixed name means later deploys just no-op-reconcile the completed Job rather than
+re-running it). Locally: `pnpm padi:backfill-enums [-- --dry-run]`.
+
 `experiences.feeling` → `rating` is a **best-effort ordinal mapping, not a confirmed PADI spec**: only
 4 distinct values have ever been observed across a real 75-dive export (`"Poor"`, `"Average"`,
 `"Good"`, `"Amazing"` — no null-adjacent "Fair"/"Terrible" tier seen), so `lib/padi/field-map.ts`

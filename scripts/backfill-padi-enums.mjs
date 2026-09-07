@@ -17,16 +17,16 @@
 // entries (a PADI code that equals its own app value) are excluded from the rewrite entirely, so a
 // second run touches zero rows.
 //
+// A plain .mjs, not the lib/padi/enum-map.ts it mirrors: this is the one script in scripts/ meant
+// to run inside the deployed container as a one-off Job (helm-charts/templates/
+// padi-backfill-enums-job.yaml), and the Docker image's runner stage only copies scripts/ and
+// migrations/ verbatim -- not lib/ -- matching every other script here that talks to Postgres
+// (db-migrate.mjs, notification-worker.mjs, padi-token-refresh.mjs). If lib/padi/enum-map.ts's
+// forward maps ever change, mirror the change here too.
+//
 // Usage: pnpm padi:backfill-enums [-- --dry-run]
 import pg from "pg";
 
-import {
-  APP_CURRENT_BY_PADI_CURRENT,
-  APP_SUIT_BY_PADI_SUIT,
-  APP_SURGE_BY_PADI_SURGE,
-  APP_WAVES_BY_PADI_WAVES,
-  APP_WEIGHT_BY_PADI_WEIGHT,
-} from "../lib/padi/enum-map";
 import { getDatabaseUrl, loadEnvFiles } from "./env.mjs";
 
 loadEnvFiles();
@@ -39,22 +39,70 @@ if (!databaseUrl) {
 const dryRun = process.argv.includes("--dry-run");
 const pool = new pg.Pool({ connectionString: databaseUrl });
 
-const COLUMNS: { column: "waves" | "current" | "surge" | "suit_type" | "weight_feedback"; map: Record<string, string> }[] = [
-  { column: "waves", map: APP_WAVES_BY_PADI_WAVES },
-  { column: "current", map: APP_CURRENT_BY_PADI_CURRENT },
-  { column: "surge", map: APP_SURGE_BY_PADI_SURGE },
-  { column: "suit_type", map: APP_SUIT_BY_PADI_SUIT },
-  { column: "weight_feedback", map: APP_WEIGHT_BY_PADI_WEIGHT },
+function invert(map) {
+  const inverted = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (value in inverted) throw new Error(`enum-map: "${value}" is not a unique value, can't invert`);
+    inverted[value] = key;
+  }
+  return inverted;
+}
+
+// Mirrors lib/padi/enum-map.ts's forward (app -> PADI) maps -- these are inverted below the same
+// way that module derives its own reverse maps.
+const PADI_SUIT_BY_APP_SUIT = {
+  "Skin / rash guard": "SkinSuit",
+  Shorty: "Shorty",
+  "Wetsuit 3mm": "FullSuit_3mm",
+  "Wetsuit 5mm": "FullSuit_5mm",
+  "Wetsuit 7mm": "FullSuit_7mm",
+  "Semi-dry": "SemiDrySuit",
+  Drysuit: "DrySuit",
+};
+
+const PADI_WEIGHT_BY_APP_WEIGHT = {
+  Underweight: "Light",
+  Perfect: "Good",
+  Overweight: "Heavy",
+};
+
+const PADI_WAVES_BY_APP_INTENSITY = {
+  None: "NoWaves",
+  Mild: "SmallWaves",
+  Moderate: "MediumWaves",
+  Strong: "LargeWaves",
+};
+
+const PADI_CURRENT_BY_APP_INTENSITY = {
+  None: "NoCurrent",
+  Mild: "SomeCurrent",
+  Moderate: "MediumCurrent",
+  Strong: "StrongCurrent",
+};
+
+const PADI_SURGE_BY_APP_INTENSITY = {
+  None: "NoSurge",
+  Mild: "SomeSurge",
+  Moderate: "MediumSurge",
+  Strong: "StrongSurge",
+};
+
+const COLUMNS = [
+  { column: "waves", map: invert(PADI_WAVES_BY_APP_INTENSITY) },
+  { column: "current", map: invert(PADI_CURRENT_BY_APP_INTENSITY) },
+  { column: "surge", map: invert(PADI_SURGE_BY_APP_INTENSITY) },
+  { column: "suit_type", map: invert(PADI_SUIT_BY_APP_SUIT) },
+  { column: "weight_feedback", map: invert(PADI_WEIGHT_BY_APP_WEIGHT) },
 ];
 
-async function backfillColumn(column: string, map: Record<string, string>): Promise<{ updated: number }> {
+async function backfillColumn(column, map) {
   // Drop self-mapping entries (e.g. suit_type's "Shorty" -> "Shorty") -- rewriting a row to the
   // value it already holds isn't a real update, and would make a second run of this script report
   // work done when nothing actually changed.
   const entries = Object.entries(map).filter(([from, to]) => from !== to);
   if (entries.length === 0) return { updated: 0 };
 
-  const { rows } = await pool.query<{ id: number; value: string }>(
+  const { rows } = await pool.query(
     `select id, ${column} as value from dives where padi_dive_id is not null and ${column} = any($1::text[])`,
     [entries.map(([from]) => from)],
   );

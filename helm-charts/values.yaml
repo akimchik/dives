@@ -79,6 +79,15 @@ databaseApp:
 migration:
   enabled: true
 
+# One-off Job for issue #20 (scripts/backfill-padi-enums.mjs): rewrites PADI-imported dives'
+# waves/current/surge/suit_type/weight_feedback columns from PADI's raw enum codes to this app's own
+# vocabulary. Off by default -- flip to true for exactly one deploy to run it, then leave it: the
+# Job's name has no per-deploy suffix, so once it exists and its spec is unchanged, later deploys
+# just no-op-reconcile the same completed Job rather than re-running the script (it's idempotent
+# either way, but this avoids the wasted round trips of re-running it on every future deploy).
+padiBackfillEnums:
+  enabled: false
+
 notifications:
   schedule: "*/2 * * * *"
   batchSize: "50"

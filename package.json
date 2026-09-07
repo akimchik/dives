@@ -22,7 +22,7 @@
     "padi:debug-logbook": "node scripts/padi/debug-logbook.mjs",
     "suunto:sidecar": "node scripts/suunto-sidecar/server.mjs",
     "suunto:backfill-gas-rate": "tsx scripts/backfill-suunto-gas-rate.ts",
-    "padi:backfill-enums": "tsx scripts/backfill-padi-enums.ts",
+    "padi:backfill-enums": "node scripts/backfill-padi-enums.mjs",
     "lint:unused": "knip"
   },
   "dependencies": {

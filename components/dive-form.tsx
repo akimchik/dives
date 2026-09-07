@@ -411,21 +411,24 @@ function ChoiceField({
   options: ChoiceOption[];
   placeholder: string;
   onChange: (next: string) => void;
-  // Set for fields PADI import can populate with its own enum codes (e.g. "FullSuit_7mm",
-  // "SomeCurrent"): a value that isn't one of `options` and isn't the NONE sentinel means the
-  // reverse map in lib/padi/field-map.ts had no entry for it, so it was imported as-is (issue #20).
+  // Set for fields where import (PADI, or any future source) can store a value outside this
+  // dropdown's own vocabulary -- e.g. a PADI enum code with no entry in lib/padi/field-map.ts's
+  // reverse map (issue #20). A value that isn't one of `options`, isn't NONE, and isn't blank is
+  // shown as-is with a warning instead of silently blanking the selector.
   warnUnrecognized?: boolean;
 }) {
+  const warningId = `${id}-unrecognized-warning`;
   const isUnrecognized =
     warnUnrecognized &&
     value !== NONE &&
+    value !== "" &&
     !options.some((option) => (typeof option === "string" ? option : option.value) === value);
 
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger id={id} aria-label={label}>
+        <SelectTrigger id={id} aria-label={label} aria-describedby={isUnrecognized ? warningId : undefined}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -444,9 +447,9 @@ function ChoiceField({
         </SelectContent>
       </Select>
       {isUnrecognized ? (
-        <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+        <p id={warningId} className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          Unrecognized value from PADI, shown as-is
+          Unrecognized value, shown as-is
         </p>
       ) : null}
     </div>
@@ -844,6 +847,7 @@ export function DiveForm({
             options={ENTRY_TYPES}
             placeholder="Not recorded"
             onChange={(next) => set("entryType", next)}
+            warnUnrecognized
           />
         </CardContent>
       </Card>

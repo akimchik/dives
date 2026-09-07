@@ -13,8 +13,9 @@
 // untouched (the latter keeps showing the dive-form's "unrecognized value" warning, which is the
 // intended fallback UX for issue #20, not a bug this script should paper over).
 //
-// Idempotent: a column already in app format has no matching reverse-map key, so a second run is a
-// no-op.
+// Idempotent: a column already in app format has no matching reverse-map key, and self-mapping
+// entries (a PADI code that equals its own app value) are excluded from the rewrite entirely, so a
+// second run touches zero rows.
 //
 // Usage: pnpm padi:backfill-enums [-- --dry-run]
 import pg from "pg";
@@ -47,17 +48,32 @@ const COLUMNS: { column: "waves" | "current" | "surge" | "suit_type" | "weight_f
 ];
 
 async function backfillColumn(column: string, map: Record<string, string>): Promise<{ updated: number }> {
+  // Drop self-mapping entries (e.g. suit_type's "Shorty" -> "Shorty") -- rewriting a row to the
+  // value it already holds isn't a real update, and would make a second run of this script report
+  // work done when nothing actually changed.
+  const entries = Object.entries(map).filter(([from, to]) => from !== to);
+  if (entries.length === 0) return { updated: 0 };
+
   const { rows } = await pool.query<{ id: number; value: string }>(
     `select id, ${column} as value from dives where padi_dive_id is not null and ${column} = any($1::text[])`,
-    [Object.keys(map)],
+    [entries.map(([from]) => from)],
   );
+  if (rows.length === 0) return { updated: 0 };
 
   for (const row of rows) {
-    const next = map[row.value];
-    console.log(`dives.id=${row.id}: ${dryRun ? "would update" : "updating"} ${column} "${row.value}" -> "${next}"`);
-    if (!dryRun) {
-      await pool.query(`update dives set ${column} = $2 where id = $1`, [row.id, next]);
-    }
+    console.log(`dives.id=${row.id}: ${dryRun ? "would update" : "updating"} ${column} "${row.value}" -> "${map[row.value]}"`);
+  }
+
+  if (!dryRun) {
+    // One bulk UPDATE per column (a handful of distinct code pairs) rather than one round trip per
+    // matched row (there are thousands of those).
+    const valuesSql = entries.map((_, index) => `($${index * 2 + 1}::text, $${index * 2 + 2}::text)`).join(", ");
+    await pool.query(
+      `update dives set ${column} = v.next
+       from (values ${valuesSql}) as v(prev, next)
+       where dives.padi_dive_id is not null and dives.${column} = v.prev`,
+      entries.flat(),
+    );
   }
 
   return { updated: rows.length };

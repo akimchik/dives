@@ -5,8 +5,16 @@
 // issue #20: an unrecognized code on either side falls through as-is rather than being dropped, so
 // callers should always fall back to the raw value on a missed lookup (`map[value] ?? value`).
 
+// Throws on a duplicate value rather than silently dropping an entry -- a non-injective source map
+// would make the reverse lookup lossy, which defeats the whole point of deriving it instead of
+// hand-writing it.
 function invert(map: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(map).map(([key, value]) => [value, key]));
+  const inverted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (value in inverted) throw new Error(`enum-map: "${value}" is not a unique value, can't invert`);
+    inverted[value] = key;
+  }
+  return inverted;
 }
 
 export const PADI_SUIT_BY_APP_SUIT: Record<string, string> = {

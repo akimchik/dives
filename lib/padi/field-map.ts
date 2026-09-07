@@ -14,6 +14,13 @@
 //    A missing/unparseable `dive_date` fails the whole mapping rather than producing a dive with a
 //    null `occurred_at` (that column is `not null`).
 import type { DiveInput } from "@/lib/dives";
+import {
+  APP_CURRENT_BY_PADI_CURRENT,
+  APP_SUIT_BY_PADI_SUIT,
+  APP_SURGE_BY_PADI_SURGE,
+  APP_WAVES_BY_PADI_WAVES,
+  APP_WEIGHT_BY_PADI_WEIGHT,
+} from "./enum-map";
 
 interface PadiDepthTimes {
   max_depth: number | null;
@@ -224,6 +231,17 @@ function mapRating(feeling: string | null): number | null {
   return RATING_BY_PADI_FEELING[feeling] ?? null;
 }
 
+// PADI's condition/equipment enum codes (e.g. "NoCurrent", "SomeSurge", "FullSuit_7mm") mapped back
+// to this app's own vocabulary via the shared dictionaries in `./enum-map` -- the exact inverse of
+// the maps `lib/padi/create.ts` uses on export. These columns are free-text with no CHECK
+// constraint, so a code with no reverse entry (a future PADI value this app hasn't seen yet) passes
+// through verbatim rather than being dropped; `dive-form.tsx`'s `ChoiceField` flags such passthrough
+// values with a warning next to the dropdown (issue #20).
+function mapPadiEnum(map: Record<string, string>, value: string | null): string | null {
+  if (!value) return null;
+  return map[value] ?? value;
+}
+
 export function mapPadiLogToDive(record: PadiLogbookDetail): MapPadiLogResult {
   const occurredAt = parseUtcMidnight(record.dive_date);
   if (!occurredAt) {
@@ -250,12 +268,12 @@ export function mapPadiLogToDive(record: PadiLogbookDetail): MapPadiLogResult {
     waterType: conditions.water_type ?? null,
     bodyOfWater: conditions.body_of_water ?? null,
     weather: conditions.weather ?? null,
-    waves: conditions.wave_condition ?? null,
-    current: conditions.current ?? null,
-    surge: conditions.surge ?? null,
-    suitType: equipment.suit_type ?? null,
+    waves: mapPadiEnum(APP_WAVES_BY_PADI_WAVES, conditions.wave_condition ?? null),
+    current: mapPadiEnum(APP_CURRENT_BY_PADI_CURRENT, conditions.current ?? null),
+    surge: mapPadiEnum(APP_SURGE_BY_PADI_SURGE, conditions.surge ?? null),
+    suitType: mapPadiEnum(APP_SUIT_BY_PADI_SUIT, equipment.suit_type ?? null),
     weight: equipment.weight ?? null,
-    weightFeedback: equipment.weight_type ?? null,
+    weightFeedback: mapPadiEnum(APP_WEIGHT_BY_PADI_WEIGHT, equipment.weight_type ?? null),
     cylinderSize: equipment.cylinder_size ?? null,
     tankInfo: equipment.cylinder_type ?? null,
     gasMix: equipment.gas_mixture ?? null,

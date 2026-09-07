@@ -5,6 +5,13 @@ import type { DiveOwner, DiveRecord } from "@/lib/dives";
 import { DiveNotFoundError } from "@/lib/dives";
 import { assertKeyConfigured, decryptSecret, keyFromEnvValue } from "./crypto";
 import { createLogbookDive as defaultCreateLogbookDive, decodeIdTokenClaims, PadiApiError } from "./client";
+import {
+  PADI_CURRENT_BY_APP_INTENSITY,
+  PADI_SUIT_BY_APP_SUIT,
+  PADI_SURGE_BY_APP_INTENSITY,
+  PADI_WAVES_BY_APP_INTENSITY,
+  PADI_WEIGHT_BY_APP_WEIGHT,
+} from "./enum-map";
 
 export type CreatePadiDiveResult =
   | { ok: true; padiDiveId: number }
@@ -48,43 +55,6 @@ const PADI_DIVE_TYPE_BY_ENTRY_TYPE: Record<string, string> = {
   Boat: "Boat",
   Liveaboard: "Boat",
   Drift: "Boat",
-};
-
-const PADI_SUIT_BY_APP_SUIT: Record<string, string> = {
-  "Skin / rash guard": "SkinSuit",
-  Shorty: "Shorty",
-  "Wetsuit 3mm": "FullSuit_3mm",
-  "Wetsuit 5mm": "FullSuit_5mm",
-  "Wetsuit 7mm": "FullSuit_7mm",
-  "Semi-dry": "SemiDrySuit",
-  Drysuit: "DrySuit",
-};
-
-const PADI_WEIGHT_BY_APP_WEIGHT: Record<string, string> = {
-  Underweight: "Light",
-  Perfect: "Good",
-  Overweight: "Heavy",
-};
-
-const PADI_WAVES_BY_APP_INTENSITY: Record<string, string> = {
-  None: "NoWaves",
-  Mild: "SmallWaves",
-  Moderate: "MediumWaves",
-  Strong: "LargeWaves",
-};
-
-const PADI_CURRENT_BY_APP_INTENSITY: Record<string, string> = {
-  None: "NoCurrent",
-  Mild: "SomeCurrent",
-  Moderate: "MediumCurrent",
-  Strong: "StrongCurrent",
-};
-
-const PADI_SURGE_BY_APP_INTENSITY: Record<string, string> = {
-  None: "NoSurge",
-  Mild: "SomeSurge",
-  Moderate: "MediumSurge",
-  Strong: "StrongSurge",
 };
 
 const PADI_FEELING_BY_RATING: Record<number, string> = {

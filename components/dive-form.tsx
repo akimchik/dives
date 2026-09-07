@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { GitMerge, Loader2, Save, Star } from "lucide-react";
+import { AlertTriangle, GitMerge, Loader2, Save, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { createDiveAction, recentCylindersAction, updateDiveAction } from "@/app/actions/dives";
@@ -403,6 +403,7 @@ function ChoiceField({
   options,
   placeholder,
   onChange,
+  warnUnrecognized,
 }: {
   id: string;
   label: string;
@@ -410,7 +411,16 @@ function ChoiceField({
   options: ChoiceOption[];
   placeholder: string;
   onChange: (next: string) => void;
+  // Set for fields PADI import can populate with its own enum codes (e.g. "FullSuit_7mm",
+  // "SomeCurrent"): a value that isn't one of `options` and isn't the NONE sentinel means the
+  // reverse map in lib/padi/field-map.ts had no entry for it, so it was imported as-is (issue #20).
+  warnUnrecognized?: boolean;
 }) {
+  const isUnrecognized =
+    warnUnrecognized &&
+    value !== NONE &&
+    !options.some((option) => (typeof option === "string" ? option : option.value) === value);
+
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -420,6 +430,7 @@ function ChoiceField({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>Not recorded</SelectItem>
+          {isUnrecognized ? <SelectItem value={value}>{value}</SelectItem> : null}
           {options.map((option) => {
             const { value: optionValue, label: optionLabel } =
               typeof option === "string" ? { value: option, label: option } : option;
@@ -432,6 +443,12 @@ function ChoiceField({
           })}
         </SelectContent>
       </Select>
+      {isUnrecognized ? (
+        <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          Unrecognized value from PADI, shown as-is
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -907,6 +924,7 @@ export function DiveForm({
               options={WEIGHT_FEEDBACK}
               placeholder="Not recorded"
               onChange={(next) => set("weightFeedback", next)}
+              warnUnrecognized
             />
             <ChoiceField
               id="suitType"
@@ -915,6 +933,7 @@ export function DiveForm({
               options={SUIT_TYPES}
               placeholder="Not recorded"
               onChange={(next) => set("suitType", next)}
+              warnUnrecognized
             />
           </div>
 
@@ -950,6 +969,7 @@ export function DiveForm({
             options={INTENSITIES}
             placeholder="Not recorded"
             onChange={(next) => set("current", next)}
+            warnUnrecognized
           />
           <ChoiceField
             id="surge"
@@ -958,6 +978,7 @@ export function DiveForm({
             options={INTENSITIES}
             placeholder="Not recorded"
             onChange={(next) => set("surge", next)}
+            warnUnrecognized
           />
           <ChoiceField
             id="waves"
@@ -966,6 +987,7 @@ export function DiveForm({
             options={INTENSITIES}
             placeholder="Not recorded"
             onChange={(next) => set("waves", next)}
+            warnUnrecognized
           />
           <Field id="weather" label="Weather">
             <Input

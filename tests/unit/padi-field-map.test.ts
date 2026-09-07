@@ -51,12 +51,12 @@ describe("mapPadiLogToDive", () => {
       waterType: "Salt",
       bodyOfWater: "Ocean",
       weather: "Rainy",
-      waves: "SmallWaves",
-      current: "SomeCurrent",
-      surge: "MediumSurge",
-      suitType: "FullSuit_7mm",
+      waves: "Mild",
+      current: "Mild",
+      surge: "Moderate",
+      suitType: "Wetsuit 7mm",
       weight: 6,
-      weightFeedback: "Good",
+      weightFeedback: "Perfect",
       cylinderSize: 14,
       tankInfo: "Steel",
       gasMix: "Air",
@@ -92,6 +92,32 @@ describe("mapPadiLogToDive", () => {
     expect(mapPadiLogToDive({ ...leftFromMol, dive_type: null })).toMatchObject({
       ok: true,
       diveInput: { entryType: null },
+    });
+  });
+
+  it("maps PADI condition/equipment enum codes onto the app's own vocabulary, passing unrecognized codes through as-is", () => {
+    const record: PadiLogbookDetail = {
+      ...leftFromMol,
+      conditions: [
+        { ...leftFromMol.conditions![0], wave_condition: "LargeWaves", current: "StrongCurrent", surge: "NoSurge" },
+      ],
+      equipment: [{ ...leftFromMol.equipment![0], suit_type: "DrySuit", weight_type: "Light" }],
+    };
+    expect(mapPadiLogToDive(record)).toMatchObject({
+      ok: true,
+      diveInput: { waves: "Strong", current: "Strong", surge: "None", suitType: "Drysuit", weightFeedback: "Underweight" },
+    });
+
+    // A future PADI code this app hasn't seen must still land somewhere visible/editable rather
+    // than being dropped -- the edit form flags these with a warning next to the dropdown (#20).
+    const unrecognized: PadiLogbookDetail = {
+      ...leftFromMol,
+      conditions: [{ ...leftFromMol.conditions![0], wave_condition: "HugeWaves", current: null, surge: null }],
+      equipment: [{ ...leftFromMol.equipment![0], suit_type: "Vulcanized", weight_type: null }],
+    };
+    expect(mapPadiLogToDive(unrecognized)).toMatchObject({
+      ok: true,
+      diveInput: { waves: "HugeWaves", current: null, surge: null, suitType: "Vulcanized", weightFeedback: null },
     });
   });
 

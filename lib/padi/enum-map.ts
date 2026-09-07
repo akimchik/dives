@@ -1,0 +1,52 @@
+// Shared bidirectional maps between this app's dive-condition/equipment vocabulary and PADI's own
+// enum codes (e.g. app "Wetsuit 7mm" <-> PADI "FullSuit_7mm", app "Mild" <-> PADI "SomeCurrent").
+// Both `lib/padi/create.ts` (app -> PADI, on create/update) and `lib/padi/field-map.ts` (PADI ->
+// app, on import) read from the same source maps so the two directions can't drift apart. See
+// issue #20: an unrecognized code on either side falls through as-is rather than being dropped, so
+// callers should always fall back to the raw value on a missed lookup (`map[value] ?? value`).
+
+function invert(map: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(map).map(([key, value]) => [value, key]));
+}
+
+export const PADI_SUIT_BY_APP_SUIT: Record<string, string> = {
+  "Skin / rash guard": "SkinSuit",
+  Shorty: "Shorty",
+  "Wetsuit 3mm": "FullSuit_3mm",
+  "Wetsuit 5mm": "FullSuit_5mm",
+  "Wetsuit 7mm": "FullSuit_7mm",
+  "Semi-dry": "SemiDrySuit",
+  Drysuit: "DrySuit",
+};
+export const APP_SUIT_BY_PADI_SUIT: Record<string, string> = invert(PADI_SUIT_BY_APP_SUIT);
+
+export const PADI_WEIGHT_BY_APP_WEIGHT: Record<string, string> = {
+  Underweight: "Light",
+  Perfect: "Good",
+  Overweight: "Heavy",
+};
+export const APP_WEIGHT_BY_PADI_WEIGHT: Record<string, string> = invert(PADI_WEIGHT_BY_APP_WEIGHT);
+
+export const PADI_WAVES_BY_APP_INTENSITY: Record<string, string> = {
+  None: "NoWaves",
+  Mild: "SmallWaves",
+  Moderate: "MediumWaves",
+  Strong: "LargeWaves",
+};
+export const APP_WAVES_BY_PADI_WAVES: Record<string, string> = invert(PADI_WAVES_BY_APP_INTENSITY);
+
+export const PADI_CURRENT_BY_APP_INTENSITY: Record<string, string> = {
+  None: "NoCurrent",
+  Mild: "SomeCurrent",
+  Moderate: "MediumCurrent",
+  Strong: "StrongCurrent",
+};
+export const APP_CURRENT_BY_PADI_CURRENT: Record<string, string> = invert(PADI_CURRENT_BY_APP_INTENSITY);
+
+export const PADI_SURGE_BY_APP_INTENSITY: Record<string, string> = {
+  None: "NoSurge",
+  Mild: "SomeSurge",
+  Moderate: "MediumSurge",
+  Strong: "StrongSurge",
+};
+export const APP_SURGE_BY_PADI_SURGE: Record<string, string> = invert(PADI_SURGE_BY_APP_INTENSITY);

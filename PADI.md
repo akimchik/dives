@@ -93,7 +93,10 @@ payload uses the same values split into `general`, `depthTime`, `conditions`, `e
 `experience` `_set` inputs for `UpdateRecreationalDiveLog`; PADI course/training update calls are
 not implemented.
 
-Key enum translations are intentionally conservative and visible in tests:
+Key enum translations are intentionally conservative and visible in tests. Each app<->PADI pair below
+is a single bidirectional dictionary in `lib/padi/enum-map.ts`, shared by `create.ts` (this table,
+app->PADI) and `field-map.ts` (the import table below, PADI->app) so the two directions can't drift
+apart:
 
 | App value | PADI create value |
 |---|---|
@@ -136,12 +139,12 @@ timezone offset (e.g. `"2026-08-30T00:00:00"`) and is treated as UTC midnight.
 | `conditions.water_type` | `water_type` |
 | `conditions.body_of_water` | `body_of_water` |
 | `conditions.weather` | `weather` |
-| `conditions.wave_condition` | `waves` |
-| `conditions.current` | `current` |
-| `conditions.surge` | `surge` |
-| `equipment.suit_type` | `suit_type` |
+| `conditions.wave_condition` | `waves` (translated via `enum-map.ts`, e.g. `SmallWaves`→`Mild`; see fallback note below) |
+| `conditions.current` | `current` (translated, e.g. `SomeCurrent`→`Mild`) |
+| `conditions.surge` | `surge` (translated, e.g. `MediumSurge`→`Moderate`) |
+| `equipment.suit_type` | `suit_type` (translated, e.g. `FullSuit_7mm`→`Wetsuit 7mm`) |
 | `equipment.weight` | `weight` |
-| `equipment.weight_type` | `weight_feedback` |
+| `equipment.weight_type` | `weight_feedback` (translated, e.g. `Good`→`Perfect`) |
 | `equipment.additional_equipment[]` | `hood` / `gloves` / `boots` (string-array membership, e.g. `"Hood"` → `hood: true`) |
 | `equipment.cylinder_type` | `tank_info` |
 | `equipment.cylinder_size` | `cylinder_size` |
@@ -154,6 +157,12 @@ timezone offset (e.g. `"2026-08-30T00:00:00"`) and is treated as UTC midnight.
 | `experiences.feeling` | `rating` (ordinal, best-effort — see note below the table) |
 | `dive_type` | `entry_type` (translated: `"BeachShore"` → `"Shore"`, `"Boat"` → `"Boat"`; an unrecognized future value passes through verbatim rather than being dropped, matching `body_of_water`'s existing free-text fallback) |
 | `dive_location` | resolved to a `dive_sites` row via `createDiveFromPadi` → `resolveDiveSiteId` (`lib/dives.ts`), the exact same name-based create-or-reuse (`findOrCreateDiveSite`) the manual dive form already uses — a site the user already has (matched case-insensitively) is reused, not duplicated. No lat/lng: PADI's logbook export carries only a free-text location name. An empty/missing `dive_location` leaves `dive_site_id` null, same as a manual dive logged with no site picked |
+
+`waves`/`current`/`surge`/`suit_type`/`weight_type` fall back to storing PADI's raw code verbatim
+when it has no entry in `enum-map.ts` (a future PADI value this app hasn't seen), the same
+passthrough pattern `entry_type` already used. `components/dive-form.tsx`'s `ChoiceField` detects
+when the stored value isn't one of the dropdown's known options and shows it as-is with a warning
+next to the selector, rather than silently blanking it (issue #20).
 
 `experiences.feeling` → `rating` is a **best-effort ordinal mapping, not a confirmed PADI spec**: only
 4 distinct values have ever been observed across a real 75-dive export (`"Poor"`, `"Average"`,

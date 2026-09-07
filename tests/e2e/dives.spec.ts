@@ -168,7 +168,7 @@ test.describe("dive logbook", () => {
     await expect(detail.filter({ hasText: /^12 L$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^200 bar$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^50 bar$/ })).toBeVisible();
-    await expect(detail.filter({ hasText: /^1800 L$/ })).toBeVisible();
+    await expect(detail.filter({ hasText: /^1800 L \/ 2400 L$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^15\.1 L\/min$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^6 kg$/ })).toBeVisible();
     await expect(detail.filter({ hasText: /^Perfect$/ })).toBeVisible();

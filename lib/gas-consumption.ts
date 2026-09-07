@@ -11,6 +11,7 @@ export type GasConsumptionInput = {
 
 export type GasConsumptionResult = {
   gasUsedLiters: number;
+  startLiters: number;
   sacRateLitersPerMin: number;
 };
 
@@ -38,7 +39,8 @@ export function computeGasConsumption(input: GasConsumptionInput): GasConsumptio
   }
 
   const gasUsedLiters = (startPressure - endPressure) * cylinderSize;
+  const startLiters = startPressure * cylinderSize;
   const sacRateLitersPerMin = gasUsedLiters / bottomTimeMinutes / ataAtDepth(avgDepth);
 
-  return { gasUsedLiters, sacRateLitersPerMin };
+  return { gasUsedLiters, startLiters, sacRateLitersPerMin };
 }

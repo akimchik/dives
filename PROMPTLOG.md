@@ -429,3 +429,15 @@ fallback both actually trigger and the tab stays responsive (707ms, not a hang) 
 placed past every cap. Full battery re-run clean after fixes: typecheck, lint (including the
 `react-hooks/set-state-in-effect` catch), `knip`, unit (105/105), e2e (21/21 webkit), and
 `pnpm build`.
+
+## 2026-09-07 — autopilot: do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/17
+
+> /autopilot do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/17
+
+Issue #17: "Gas usage should be displayed as `{used} L / {start} L`". Small, single-surface change,
+so ran a scaled-down autopilot (explore → implement → verify) instead of the full 5-phase pipeline.
+Added `startLiters` (= startPressure × cylinderSize) to `lib/gas-consumption.ts`'s
+`GasConsumptionResult`, and updated both places gas usage renders — the dive detail page's "Gas used"
+row and the dive form's live preview — to show `{used} L / {start} L`. Updated the unit tests and the
+e2e assertion that checked the old `"1800 L used"` text to match. Verified clean: typecheck, lint,
+`knip`, unit tests (105/105).

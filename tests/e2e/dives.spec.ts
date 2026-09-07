@@ -118,7 +118,7 @@ test.describe("dive logbook", () => {
     // Gas used/SAC rate is computed live from the pressures above -- proves the calculation is
     // wired end to end, not just at the unit-test level (lib/gas-consumption.ts is unit-tested
     // separately for the actual formula).
-    await expect(page.getByTestId("gas-consumption-preview")).toContainText("1800 L used");
+    await expect(page.getByTestId("gas-consumption-preview")).toContainText("1800 L / 2400 L used");
     await expect(page.getByTestId("gas-consumption-preview")).toContainText("15.1 L/min");
 
     await chooseOption(page, "Current", "Mild");

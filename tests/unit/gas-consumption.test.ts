@@ -16,6 +16,7 @@ describe("computeGasConsumption", () => {
 
     expect(result).not.toBeNull();
     expect(result!.gasUsedLiters).toBeCloseTo(1800, 5);
+    expect(result!.startLiters).toBeCloseTo(2400, 5);
     expect(result!.sacRateLitersPerMin).toBeCloseTo(16.0714, 3);
   });
 
@@ -30,6 +31,7 @@ describe("computeGasConsumption", () => {
 
     expect(result).not.toBeNull();
     expect(result!.gasUsedLiters).toBe(500);
+    expect(result!.startLiters).toBe(2000);
     expect(result!.sacRateLitersPerMin).toBeCloseTo(50, 5);
   });
 

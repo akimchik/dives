@@ -952,8 +952,8 @@ export function DiveForm({
 
           {gasConsumption ? (
             <p className="text-xs text-muted-foreground" data-testid="gas-consumption-preview">
-              {gasConsumption.gasUsedLiters.toFixed(0)} L used · SAC rate{" "}
-              {gasConsumption.sacRateLitersPerMin.toFixed(1)} L/min
+              {gasConsumption.gasUsedLiters.toFixed(0)} L / {gasConsumption.startLiters.toFixed(0)} L used
+              · SAC rate {gasConsumption.sacRateLitersPerMin.toFixed(1)} L/min
             </p>
           ) : null}
 

@@ -217,7 +217,9 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
             ["End pressure", formatMeasurement(dive.end_pressure, " bar")],
             [
               "Gas used",
-              gasConsumption ? `${gasConsumption.gasUsedLiters.toFixed(0)} L` : null,
+              gasConsumption
+                ? `${gasConsumption.gasUsedLiters.toFixed(0)} L / ${gasConsumption.startLiters.toFixed(0)} L`
+                : null,
             ],
             [
               "SAC rate",

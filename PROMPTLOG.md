@@ -481,3 +481,34 @@ rendered trimmed text. Manually verified the e2e spec actually catches a regress
 the `onClick` wiring and confirming it fails, then restored the fix. Full suite green: typecheck,
 lint, `knip`, unit (116/116), the new e2e spec plus `dives.spec.ts`/`suunto-integrations.spec.ts`
 (no regressions from the `trimNumeric` fix).
+
+## 2026-09-07 — autopilot: do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/7
+
+> /autopilot do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/7
+
+Issue #7: "Add Radar Chart view for properties that can benefit from it" — seven radar charts on
+the Dashboard (dives/month, depth, duration, visibility, water temp, SAC rate, and "Conditions &
+company" props). The issue specified per-chart scales but left the underlying axis unstated for
+five of the seven; picked calendar month (aggregated across every year logged) as the common angle
+axis for all but "Conditions & company", matching item 1's explicit month grouping and turning the
+section into one coherent seasonality view rather than seven unrelated shapes.
+
+Added `lib/dive-radar-stats.ts` (`buildDiveRadarStats`, pure — re-slices the `DiveRecord[]` the
+dashboard already fetches via `listDives`, no new queries) and `components/dive-radar-charts.tsx`
+(shadcn's Radar Chart - Grid Circle pattern over `components/ui/chart.tsx`/recharts). SAC rate is
+computed per dive via the existing `lib/gas-consumption.ts` before averaging by month. "Conditions &
+company" excludes buddy/dive shop (identity, not a magnitude) and site coordinates per the issue,
+plus weather/water type/body of water on top of that (nominal categories with no natural position
+on a radius axis) — what's left (current/surge/waves intensity, air temp, rating) is normalised to
+a 0-100% share of each field's own scale so five different units can share one radius. Ran the
+`dataviz` skill's palette validator before picking chart colors: one consistent blue for every
+single-series chart, blue/orange for the two-series water-temp chart (both clear the CVD/contrast
+gates in light and dark).
+
+Verified with a temporary seeded-data e2e spec + screenshot (not committed) that months with no
+dives collapse to the chart's center rather than leaving a gap — inherent to a fixed-category polar
+axis, not a bug. Added `tests/unit/dive-radar-stats.test.ts` (9 cases) and two assertions in
+`tests/e2e/dives.spec.ts` (section hidden for a dive-less user, matching the existing tag-cloud
+pattern; visible with real testids once a dive exists). Updated `docs/development.md` with the
+scaling/normalisation decisions. Full suite green: typecheck, lint, `knip`, unit (125/125), full
+WebKit e2e (23/23).

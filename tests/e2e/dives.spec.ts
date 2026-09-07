@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { registerViaMagicLink } from "./helpers/auth";
-import { uniqueTestEmail } from "./helpers/db";
+import { seedDive, uniqueTestEmail } from "./helpers/db";
 
 // End-to-end coverage for plan Step 6's UI screens. Two things are proven here:
 //
@@ -87,6 +87,9 @@ test.describe("dive logbook", () => {
 
     // A fresh user starts with an empty logbook and zeroed stats.
     await expect(page.getByTestId("stat-total-dives")).toHaveText("0");
+    // No dives yet -- the seasonality radar section has nothing meaningful to show, same rationale
+    // as the tag cloud, so it stays hidden rather than rendering seven empty charts.
+    await expect(page.getByTestId("dive-radar-charts")).not.toBeVisible();
 
     // ---------------------------------------------------------------- create
     const siteName = `Blue Hole ${Date.now()}`;
@@ -311,5 +314,21 @@ test.describe("dive logbook", () => {
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
     // The accessible name itself carries the dive count -- getByRole matching it is the assertion.
     await expect(page.getByRole("img", { name: /dive activity over the last year: 1 dive logged/i })).toBeVisible();
+  });
+
+  test("dashboard shows seasonality radar charts once a dive is logged", async ({ page }) => {
+    const email = uniqueTestEmail("radar-charts");
+    await registerViaMagicLink(page, email, PASSWORD);
+
+    // Seeded directly (see seedDive's own comment): this test only cares that the radar section
+    // renders real DB-backed data, not about exercising the create form again.
+    await seedDive(email, { title: "Radar Check", occurredAt: "2026-06-10T09:00:00Z", maxDepth: 22 });
+
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Seasonality" })).toBeVisible();
+    await expect(page.getByTestId("radar-dives-per-month")).toBeVisible();
+    await expect(page.getByTestId("radar-depth-per-month")).toBeVisible();
+    await expect(page.getByTestId("radar-water-temp-per-month")).toBeVisible();
+    await expect(page.getByTestId("radar-conditions")).toBeVisible();
   });
 });

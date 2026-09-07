@@ -4,6 +4,7 @@ import { Gauge, MapPin, Plus, Tag, Timer, UploadCloud, Waves } from "lucide-reac
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
+import { DiveRadarCharts } from "@/components/dive-radar-charts";
 import { FetchSuuntoButton, type SuuntoFetchStatus } from "@/components/fetch-suunto-button";
 import { SyncPadiButton, type PadiSyncStatus } from "@/components/sync-padi-button";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import {
   formatMinutes,
   trimNumeric,
 } from "@/lib/dive-format";
+import { buildDiveRadarStats } from "@/lib/dive-radar-stats";
 import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } from "@/lib/dives";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
@@ -98,6 +100,7 @@ export default async function DashboardPage() {
     getSuuntoIntegrationStatus(user.id),
   ]);
   const recent = dives.slice(0, 5);
+  const radarStats = buildDiveRadarStats(dives);
   const maxYears = maxCalendarYears(earliestDive, new Date());
   const padiSyncStatus: PadiSyncStatus = padiIntegration ? padiIntegration.status : "not_connected";
   const suuntoFetchStatus: SuuntoFetchStatus = suuntoIntegration ? suuntoIntegration.status : "not_connected";
@@ -158,6 +161,13 @@ export default async function DashboardPage() {
             <DiveActivityCalendar activity={activity} maxYears={maxYears} />
           </CardContent>
         </Card>
+
+        {dives.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-medium">Seasonality</h2>
+            <DiveRadarCharts stats={radarStats} />
+          </div>
+        ) : null}
 
         {tagCloud.length > 0 ? (
           <Card>

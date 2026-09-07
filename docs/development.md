@@ -117,11 +117,38 @@ same dive produce two outbox rows instead of collapsing into one.
 
 | Route | What it renders |
 | --- | --- |
-| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + a "Seasonality" section of radar charts (`components/dive-radar-charts.tsx`, data from `lib/dive-radar-stats.ts`'s `buildDiveRadarStats`, hidden when the user has no dives) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
 | `/dives` | The whole logbook, newest first, with a full tag cloud and `?tag=` filtering (see "Tags" below) |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
 | `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, and an update-to-PADI action for linked recreational dives marked out-of-sync |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
+
+### Dashboard seasonality radar charts
+
+`lib/dive-radar-stats.ts`'s `buildDiveRadarStats(dives)` is a pure function (no
+DB access of its own — it re-slices the same `DiveRecord[]` the dashboard
+already fetched via `listDives`) that turns a user's whole logbook into seven
+radar-chart datasets, angle axis = calendar month, aggregated across every
+year the user has logged (a January dive from 2023 and one from 2026 land in
+the same bucket — this is a seasonality view, not a timeline). Per issue #7:
+
+- Dives/month, depth, duration, visibility and SAC rate (computed per dive via
+  `lib/gas-consumption.ts`'s `computeGasConsumption`, then averaged) are each
+  their own single-series radar, scaled `0..max+10%` headroom (duration uses
+  the issue's explicit `5min..max+15min` instead).
+- Water temp is one radar with two series (avg high/avg low per month).
+- "Conditions & company" is the one radar that isn't month-bucketed: its axes
+  are Current/Surge/Waves (dive-form.tsx's ordinal intensity scale, 0-3),
+  air temp, and rating, each normalised to a 0-100% share of its own scale so
+  five different units can share one radius. Buddy/dive shop (identity, not a
+  magnitude) and site coordinates are excluded per the issue; weather/water
+  type/body of water are also left out here since they're nominal categories
+  with no natural position on a radius axis.
+
+Months (or, for the conditions chart, metrics) with no recorded dives pull
+to the center rather than leaving a gap — Recharts' polar angle axis is a
+fixed set of categories, not a continuous axis a line can skip across, so an
+empty category has nowhere else to plot.
 
 All authenticated logbook screens call `requireUser("<their own path>")` before any query, so a logged-out
 request is redirected (307) to `/?next=…` and never reaches `lib/dives.ts`.

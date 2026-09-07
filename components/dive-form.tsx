@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { TagsField } from "@/components/tags-field";
 import { parseDepthProfile } from "@/lib/depth-profile";
 import { toDateTimeLocalValue, trimNumeric } from "@/lib/dive-format";
 import type { DiveInput, DiveRecord, RecentCylinder } from "@/lib/dives";
@@ -98,6 +99,7 @@ type FormState = {
   notes: string;
   rating: number | null;
   depthProfileRaw: string;
+  tags: string[];
 };
 
 type MergeSource = "import" | "target";
@@ -190,6 +192,7 @@ function blankState(): FormState {
     notes: "",
     rating: null,
     depthProfileRaw: "",
+    tags: [],
   };
 }
 
@@ -243,6 +246,7 @@ function stateFromDive(dive: DiveRecord): FormState {
     notes: text(dive.notes),
     rating: dive.rating,
     depthProfileRaw: text(dive.depth_profile_raw),
+    tags: dive.tags,
   };
 }
 
@@ -306,6 +310,7 @@ function stateFromDraft(draft: Partial<DiveInput>): FormState {
     notes: draft.notes ?? "",
     rating: draft.rating ?? state.rating,
     depthProfileRaw: draft.depthProfileRaw ?? "",
+    tags: draft.tags ?? state.tags,
   };
 }
 
@@ -496,6 +501,9 @@ function mergeStates(
       merged[field.key] = target[field.key] as never;
     }
   }
+  // Not one of mergeFields: a reviewed Suunto import never carries tags, so there is nothing to
+  // choose between -- the target dive's own tags always survive the merge instead of being wiped.
+  merged.tags = target.tags;
   return merged;
 }
 
@@ -678,6 +686,7 @@ export function DiveForm({
           ? null
           : fallbackDepthProfile,
       depthProfileRaw: optionalText(source.depthProfileRaw),
+      tags: source.tags,
     };
   }
 
@@ -1070,6 +1079,8 @@ export function DiveForm({
               onChange={(event) => set("notes", event.target.value)}
             />
           </Field>
+
+          <TagsField value={state.tags} onChange={(next) => set("tags", next)} />
 
           <DepthProfileField
             value={state.depthProfileRaw}

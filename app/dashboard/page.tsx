@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Gauge, MapPin, Plus, Timer, UploadCloud, Waves } from "lucide-react";
+import { Gauge, MapPin, Plus, Tag, Timer, UploadCloud, Waves } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
 import { FetchSuuntoButton, type SuuntoFetchStatus } from "@/components/fetch-suunto-button";
 import { SyncPadiButton, type PadiSyncStatus } from "@/components/sync-padi-button";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -18,7 +19,16 @@ import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } fr
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
 import { getSuuntoIntegrationStatus } from "@/lib/suunto/integrations";
+import { buildTagCloud, effectiveTags, MISSING_PADI_TAG, MISSING_SUUNTO_TAG } from "@/lib/tags";
 import { cn } from "@/lib/utils";
+
+// How many of the user's most-used tags show on the dashboard's compact cloud -- the full cloud
+// with every tag lives on /dives, which is also where clicking one of these links to filter.
+const MAX_DASHBOARD_TAGS = 12;
+
+function tagBadgeVariant(tag: string): "warning" | "outline" {
+  return tag === MISSING_PADI_TAG || tag === MISSING_SUUNTO_TAG ? "warning" : "outline";
+}
 
 // How far the "All" option in the calendar's year selector can reach -- past this the dropdown
 // would grow unreasonably long for what is still a personal logbook.
@@ -91,6 +101,11 @@ export default async function DashboardPage() {
   const maxYears = maxCalendarYears(earliestDive, new Date());
   const padiSyncStatus: PadiSyncStatus = padiIntegration ? padiIntegration.status : "not_connected";
   const suuntoFetchStatus: SuuntoFetchStatus = suuntoIntegration ? suuntoIntegration.status : "not_connected";
+  const connections = {
+    padiConnected: padiSyncStatus === "connected",
+    suuntoConnected: suuntoFetchStatus === "connected",
+  };
+  const tagCloud = buildTagCloud(dives, connections).slice(0, MAX_DASHBOARD_TAGS);
 
   return (
     <AppShell email={user.email}>
@@ -144,6 +159,25 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
+        {tagCloud.length > 0 ? (
+          <Card>
+            <CardContent className="flex flex-col gap-3 px-4">
+              <h2 className="text-sm font-medium">Tags</h2>
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="dashboard-tag-cloud">
+                {tagCloud.map(({ tag, count }) => (
+                  <Link key={tag} href={`/dives?tag=${encodeURIComponent(tag)}`}>
+                    <Badge variant={tagBadgeVariant(tag)} className="cursor-pointer">
+                      <Tag className="size-3" aria-hidden />
+                      {tag}
+                      <span className="text-muted-foreground">{count}</span>
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <div className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="text-sm font-medium">Recent dives</h2>
@@ -176,6 +210,11 @@ export default async function DashboardPage() {
                           PADI update available
                         </span>
                       ) : null}
+                      {effectiveTags(dive, connections).map((tag) => (
+                        <Badge key={tag} variant={tagBadgeVariant(tag)} className="ml-1 align-middle">
+                          {tag}
+                        </Badge>
+                      ))}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {formatDiveDate(dive.occurred_at)}

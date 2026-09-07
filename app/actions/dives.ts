@@ -8,6 +8,7 @@ import {
   findOrCreateDiveSite,
   listDiveSites,
   listRecentCylinders,
+  listUserTags,
   updateDive,
   DiveNotFoundError,
   DiveSiteNotFoundError,
@@ -45,6 +46,12 @@ function revalidateDives(diveId?: number) {
 export async function searchDiveSitesAction(query?: string): Promise<DiveSiteRow[]> {
   const user = await requireUser();
   return listDiveSites(user.id, query);
+}
+
+// Autocomplete source for the dive form's tags field -- the session user's own tag vocabulary only.
+export async function searchTagsAction(query?: string): Promise<string[]> {
+  const user = await requireUser();
+  return listUserTags(user.id, query);
 }
 
 // Create-or-reuse for a name typed into that autocomplete.

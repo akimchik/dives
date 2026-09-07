@@ -117,8 +117,8 @@ same dive produce two outbox rows instead of collapsing into one.
 
 | Route | What it renders |
 | --- | --- |
-| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + the five most recent dives |
-| `/dives` | The whole logbook, newest first |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
+| `/dives` | The whole logbook, newest first, with a full tag cloud and `?tag=` filtering (see "Tags" below) |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
 | `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, and an update-to-PADI action for linked recreational dives marked out-of-sync |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
@@ -132,10 +132,34 @@ indistinguishable.
 Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
 every authenticated screen), `manage-menu.tsx` (the header menu linking to Dive
 Sites and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
-over the user's own sites, with inline create), `dive-sites-manager.tsx`,
+over the user's own sites, with inline create), `tags-field.tsx` (the same
+autocomplete-chip pattern for tags), `dive-sites-manager.tsx`,
 `depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx` and
 `delete-dive-button.tsx`. Every button that makes a server call follows `AGENTS.md`'s convention:
 disabled with a spinner for the duration, then a sonner toast on the result.
+
+### Tags
+
+`dives.tags` (migration `027_dives_tags.sql`, `text[] not null default '{}'`,
+GIN-indexed) holds free-text tags the user types into the dive form's
+`components/tags-field.tsx`. `lib/dives.ts`'s `listUserTags(userId, query?)`
+(`select ... from dives, unnest(tags) as tag ...`) backs its autocomplete —
+the user's own tag vocabulary, ranked by how many of their dives use each one.
+
+`"missing-padi"`/`"missing-suunto"` are never written to that column.
+`lib/tags.ts`'s `effectiveTags(dive, { padiConnected, suuntoConnected })`
+derives them on every read instead, from `padi_dive_id`/`suunto_workout_key`
+being `null` plus the user's current integration connection status — so a
+dive that gets synced later, or an integration that gets connected or
+disconnected, never needs a backfill to stay correct. The same module's
+`buildTagCloud(dives, connections)` aggregates counts across an
+already-fetched `listDives()` result (personal logbooks are small enough that
+this runs in JS rather than a second SQL round trip, and guarantees the
+cloud's counts and `/dives`' `?tag=` filtered list always agree). `/dives`
+filters its full list by tag; dive numbering (`#1, #2, …`) is computed before
+filtering so it never shifts when a tag filter is applied.
+`components/tags-field.tsx` normalizes on add (trim, lowercase, collapse
+whitespace) and refuses to let a user manually add either reserved tag name.
 
 ### Depth profile
 

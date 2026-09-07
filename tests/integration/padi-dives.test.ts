@@ -238,6 +238,7 @@ describe("createDiveFromPadi", () => {
       rating: null,
       depthProfile: null,
       depthProfileRaw: null,
+      tags: [],
     });
 
     const stored = await getDive(owner.id, created.id);

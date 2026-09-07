@@ -114,6 +114,10 @@ export type DiveSnapshot = {
   // The original bundle blob is intentionally not part of snapshots/backups/DTOs.
   suunto_workout_key: string | null;
   suunto_profile: unknown;
+  // User-supplied free-text tags (migration 027). "missing-padi"/"missing-suunto" are never stored
+  // here -- see lib/tags.ts's effectiveTags(), which derives them from padi_dive_id/
+  // suunto_workout_key plus the user's integration status instead, so they can't go stale.
+  tags: string[];
   site_name: string | null;
   site_location: string | null;
   site_lat: number | null;
@@ -166,6 +170,7 @@ export type DiveInput = {
   rating: number | null;
   depthProfile: unknown;
   depthProfileRaw: string | null;
+  tags: string[];
 };
 
 type DiveEvent = "create" | "edit" | "delete";
@@ -221,6 +226,7 @@ const snapshotColumns = `
   d.padi_last_compared_at,
   d.suunto_workout_key,
   d.suunto_profile,
+  d.tags,
   s.name as site_name,
   s.location as site_location,
   s.lat as site_lat,
@@ -272,7 +278,32 @@ function diveValues(diveSiteId: number | null, input: DiveInput) {
       ? null
       : JSON.stringify(input.depthProfile),
     input.depthProfileRaw,
+    input.tags,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+// Autocomplete source for the dive form's tags field: the session user's own tag vocabulary,
+// deduped and ranked by how many of their dives use each one. "missing-padi"/"missing-suunto" are
+// never in here since they're never stored (see lib/tags.ts's effectiveTags()).
+export async function listUserTags(userId: string, query?: string): Promise<string[]> {
+  const result = await queryRead<{ tag: string }>(
+    `
+      select tag, count(*) as dive_count
+      from dives, unnest(tags) as tag
+      where user_id = $1
+        and ($2::text is null or tag ilike '%' || $2 || '%')
+      group by tag
+      order by dive_count desc, tag asc
+      limit 50
+    `,
+    [userId, query?.trim() ? query.trim() : null],
+  );
+
+  return result.rows.map((row) => row.tag);
 }
 
 // ---------------------------------------------------------------------------
@@ -740,11 +771,11 @@ export async function createDive(owner: DiveOwner, input: DiveInput): Promise<Di
           water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
           start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
           buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
-          entry_type, notes, rating, depth_profile, depth_profile_raw
+          entry_type, notes, rating, depth_profile, depth_profile_raw, tags
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36
         )
         returning id
       `,
@@ -826,6 +857,7 @@ export async function createDiveFromPadi(
       rating: input.rating ?? null,
       depthProfile: input.depthProfile ?? null,
       depthProfileRaw: input.depthProfileRaw ?? null,
+      tags: input.tags ?? [],
     };
 
     const inserted = await client.query<{ id: number }>(
@@ -835,14 +867,14 @@ export async function createDiveFromPadi(
           water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
           start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
           buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
-          entry_type, notes, rating, depth_profile, depth_profile_raw,
+          entry_type, notes, rating, depth_profile, depth_profile_raw, tags,
           padi_dive_id, dive_number, padi_member_number, adventure_dive, dive_type, log_type,
           log_course, padi_status
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
-          $36, $37, $38, $39, $40, $41, $42, $43
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+          $37, $38, $39, $40, $41, $42, $43, $44
         )
         on conflict (user_id, padi_dive_id) where padi_dive_id is not null do nothing
         returning id
@@ -926,13 +958,13 @@ export async function createDiveFromSuuntoImport(
           water_temp, water_temp_low, air_temp, visibility, gas_mix, tank_info, cylinder_size,
           start_pressure, end_pressure, weight, weight_feedback, suit_type, hood, gloves, boots,
           buddy, dive_shop, current, surge, waves, weather, water_type, body_of_water,
-          entry_type, notes, rating, depth_profile, depth_profile_raw,
+          entry_type, notes, rating, depth_profile, depth_profile_raw, tags,
           suunto_workout_key, suunto_profile, suunto_original_bundle
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35,
-          $36, $37::jsonb, $38
+          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+          $37, $38::jsonb, $39
         )
         on conflict (user_id, suunto_workout_key) where suunto_workout_key is not null do nothing
         returning id
@@ -1066,9 +1098,10 @@ export async function mergeSuuntoImportIntoDive(
           rating = $34,
           depth_profile = $35,
           depth_profile_raw = $36,
-          suunto_workout_key = $37,
-          suunto_profile = $38::jsonb,
-          suunto_original_bundle = $39,
+          tags = $37,
+          suunto_workout_key = $38,
+          suunto_profile = $39::jsonb,
+          suunto_original_bundle = $40,
           padi_needs_update = case
             when padi_dive_id is not null and log_type = 'Recreational' and log_course is null then true
             else padi_needs_update
@@ -1146,6 +1179,7 @@ export async function updateDive(
           rating = $34,
           depth_profile = $35,
           depth_profile_raw = $36,
+          tags = $37,
           padi_needs_update = case
             when padi_dive_id is not null and log_type = 'Recreational' and log_course is null then true
             else padi_needs_update

@@ -75,6 +75,7 @@ function serializeMergeCandidate(dive: SuuntoMergeDiveCandidate) {
       rating: dive.rating,
       depthProfileRaw: text(dive.depth_profile_raw),
       depthProfile: dive.depth_profile,
+      tags: dive.tags,
     },
   };
 }

@@ -33,6 +33,7 @@ const {
   listDiveSitesWithDiveCounts,
   listDives,
   listRecentCylinders,
+  listUserTags,
   listSuuntoMergeDiveCandidates,
   mergeDiveSites,
   mergeSuuntoImportIntoDive,
@@ -103,6 +104,7 @@ function diveInput(overrides: Record<string, unknown> = {}) {
       { t: 60, d: 12.4 },
     ],
     depthProfileRaw: "0,0\n60,12.4\n",
+    tags: [],
     ...overrides,
   } as Parameters<typeof createDive>[1];
 }
@@ -177,10 +179,10 @@ describe("dive mutations enqueue a dive_backup notification in the same transact
     ]);
     expect(payload.dive.depth_profile_raw).toBe("0,0\n60,12.4\n");
 
-    // depth_profile is the one key the CSV builder is allowed to JSON-stringify into a single cell;
-    // everything else must already be a scalar.
+    // depth_profile and tags are the keys the CSV builder is allowed to JSON-stringify into a
+    // single cell; everything else must already be a scalar.
     for (const [key, value] of Object.entries(payload.dive)) {
-      if (key === "depth_profile") continue;
+      if (key === "depth_profile" || key === "tags") continue;
       expect(value === null || typeof value !== "object").toBe(true);
     }
 
@@ -907,5 +909,38 @@ describe("getDiveActivityByDay", () => {
       { date: "2026-06-01", count: 2 },
       { date: "2026-06-03", count: 1 },
     ]);
+  });
+});
+
+describe("tags (issue #19)", () => {
+  it("round-trips tags through create and update", async () => {
+    const owner = await createOwner();
+
+    const created = await createDive(owner, diveInput({ tags: ["wreck", "night-dive"] }));
+    expect((await getDive(owner.id, created.id))?.tags).toEqual(["wreck", "night-dive"]);
+
+    await updateDive(owner, created.id, diveInput({ tags: ["shark"] }));
+    expect((await getDive(owner.id, created.id))?.tags).toEqual(["shark"]);
+
+    // Clearing back to no tags -- an empty array, not null, since the column is `not null default
+    // '{}'`.
+    await updateDive(owner, created.id, diveInput({ tags: [] }));
+    expect((await getDive(owner.id, created.id))?.tags).toEqual([]);
+  });
+
+  it("listUserTags ranks by usage, filters by query, and stays scoped per user", async () => {
+    const owner = await createOwner();
+    const other = await createOwner();
+
+    await createDive(owner, diveInput({ tags: ["wreck", "night-dive"] }));
+    await createDive(owner, diveInput({ tags: ["wreck"] }));
+    await createDive(owner, diveInput({ tags: ["shark"] }));
+    // Another user's tags, including one with the same name -- must never appear in owner's list
+    // and must not inflate owner's "wreck" count.
+    await createDive(other, diveInput({ tags: ["wreck", "cave"] }));
+
+    expect(await listUserTags(owner.id)).toEqual(["wreck", "night-dive", "shark"]);
+    expect(await listUserTags(owner.id, "wre")).toEqual(["wreck"]);
+    expect(await listUserTags(owner.id, "cave")).toEqual([]);
   });
 });

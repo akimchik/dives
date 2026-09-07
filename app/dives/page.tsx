@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus, Star, UploadCloud, Waves } from "lucide-react";
+import { Plus, Star, Tag, UploadCloud, Waves, X } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -12,12 +13,19 @@ import {
   formatMinutes,
 } from "@/lib/dive-format";
 import { listDives } from "@/lib/dives";
+import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
 import { requireUser } from "@/lib/session";
+import { getSuuntoIntegrationStatus } from "@/lib/suunto/integrations";
+import { buildTagCloud, effectiveTags, MISSING_PADI_TAG, MISSING_SUUNTO_TAG } from "@/lib/tags";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Logbook · Dives",
 };
+
+function tagBadgeVariant(tag: string): "warning" | "outline" {
+  return tag === MISSING_PADI_TAG || tag === MISSING_SUUNTO_TAG ? "warning" : "outline";
+}
 
 function Rating({ value }: { value: number | null }) {
   if (value === null) return null;
@@ -38,11 +46,34 @@ function Rating({ value }: { value: number | null }) {
   );
 }
 
-export default async function DivesPage() {
+export default async function DivesPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tag?: string | string[] }>;
+}) {
   // requireUser redirects unauthenticated visitors to `/?next=/dives` before any query runs, so a
   // logged-out request never reaches listDives and never renders dive data.
   const user = await requireUser("/dives");
-  const dives = await listDives(user.id);
+  const params = await searchParams;
+  const activeTag = Array.isArray(params?.tag) ? params.tag[0] : params?.tag;
+
+  const [dives, padiIntegration, suuntoIntegration] = await Promise.all([
+    listDives(user.id),
+    getPadiIntegrationStatus(user.id),
+    getSuuntoIntegrationStatus(user.id),
+  ]);
+  const connections = {
+    padiConnected: padiIntegration?.status === "connected",
+    suuntoConnected: suuntoIntegration?.status === "connected",
+  };
+  const tagCloud = buildTagCloud(dives, connections);
+
+  // Dive numbers (#1, #2, ...) count from the oldest dive across the whole logbook, so filtering
+  // by tag must not renumber them -- the original index survives the filter alongside each dive.
+  const numbered = dives.map((dive, index) => ({ dive, number: dives.length - index }));
+  const visible = activeTag
+    ? numbered.filter(({ dive }) => effectiveTags(dive, connections).includes(activeTag))
+    : numbered;
 
   return (
     <AppShell email={user.email}>
@@ -61,6 +92,27 @@ export default async function DivesPage() {
           </Link>
         </div>
 
+        {tagCloud.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="tag-cloud">
+            {tagCloud.map(({ tag, count }) => (
+              <Link key={tag} href={activeTag === tag ? "/dives" : `/dives?tag=${encodeURIComponent(tag)}`}>
+                <Badge
+                  variant={activeTag === tag ? "default" : tagBadgeVariant(tag)}
+                  className={cn(
+                    "cursor-pointer",
+                    activeTag === tag && "ring-2 ring-ring/50",
+                  )}
+                >
+                  <Tag className="size-3" aria-hidden />
+                  {tag}
+                  <span className="text-muted-foreground">{count}</span>
+                  {activeTag === tag ? <X className="size-3" aria-hidden /> : null}
+                </Badge>
+              </Link>
+            ))}
+          </div>
+        ) : null}
+
         {dives.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -76,9 +128,19 @@ export default async function DivesPage() {
               </Link>
             </CardContent>
           </Card>
+        ) : visible.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+              <Tag className="size-8 text-muted-foreground" aria-hidden />
+              <p className="text-sm text-muted-foreground">No dives tagged &ldquo;{activeTag}&rdquo;.</p>
+              <Link href="/dives" className={cn(buttonVariants({ variant: "outline" }), "no-underline")}>
+                Clear filter
+              </Link>
+            </CardContent>
+          </Card>
         ) : (
           <ol data-testid="dive-list" className="flex flex-col gap-2">
-            {dives.map((dive, index) => (
+            {visible.map(({ dive, number }) => (
               <li key={dive.id}>
                 <Link
                   href={`/dives/${dive.id}`}
@@ -87,7 +149,7 @@ export default async function DivesPage() {
                   {/* Dive numbers count up from the oldest dive, the way a paper logbook does, so
                       the newest entry carries the highest number even though it is listed first. */}
                   <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground">
-                    #{dives.length - index}
+                    #{number}
                   </span>
 
                   <span className="min-w-0 flex-1 basis-48">
@@ -99,12 +161,19 @@ export default async function DivesPage() {
                       {dive.title && dive.site_name ? ` · ${dive.site_name}` : ""}
                       {dive.site_location ? ` · ${dive.site_location}` : ""}
                     </span>
-                    {dive.padi_needs_update ? (
-                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                        <UploadCloud className="size-3" aria-hidden />
-                        PADI update available
-                      </span>
-                    ) : null}
+                    <span className="mt-1 flex flex-wrap items-center gap-1">
+                      {dive.padi_needs_update ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                          <UploadCloud className="size-3" aria-hidden />
+                          PADI update available
+                        </span>
+                      ) : null}
+                      {effectiveTags(dive, connections).map((tag) => (
+                        <Badge key={tag} variant={tagBadgeVariant(tag)}>
+                          {tag}
+                        </Badge>
+                      ))}
+                    </span>
                   </span>
 
                   <span className="w-16 shrink-0 text-right text-sm tabular-nums">

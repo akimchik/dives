@@ -324,3 +324,41 @@ silently mixing units), wired it into `SuuntoProfileChart` as a sixth stream, an
 the gas-rate round) now that a third unit needed its own precision. Added unit tests proving the
 per-point depth-normalization (two points at the same 30 bar/min burn but different depths get
 different L/min values) and the tank-size-missing degradation, verified live in WebKit.
+
+## 2026-09-07 — Add tags to dives (autopilot, issue #19)
+
+> /autopilot do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/19
+
+Issue #19: "Add tags, so user can add tags to dives and then search via tag cloud on Dashboard.
+Also if PADI is connected -- add automatic tag: "missing-padi" and display it on all dives that
+was not synced with PADI. Same for Suunto."
+
+Added `dives.tags text[]` (migration 027, GIN-indexed) for user-supplied tags, plumbed end to end
+through `lib/dives.ts` (DiveSnapshot/DiveInput/diveValues/snapshotColumns, plus every create/update
+SQL statement that touches those positional placeholders: createDive, createDiveFromPadi,
+createDiveFromSuuntoImport, mergeSuuntoImportIntoDive, updateDive) and a new `listUserTags()` for
+the form's autocomplete. Key design call: "missing-padi"/"missing-suunto" are never stored — a new
+`lib/tags.ts` derives them on every read from `padi_dive_id`/`suunto_workout_key` being null plus
+the user's current integration connection status (`effectiveTags`), so a dive synced later or an
+integration connected/disconnected never needs a backfill to stay correct. `buildTagCloud()`
+aggregates counts across an already-fetched `listDives()` result in JS rather than a second SQL
+query, keeping the cloud and the `/dives?tag=` filtered list provably in sync. Dive numbering
+(`#1, #2, …`) is computed before filtering so it doesn't shift under a tag filter.
+
+New UI: `components/ui/badge.tsx` (hand-rolled, no shadcn Badge existed and the shadcn MCP tool
+wasn't available this session — matched the pre-existing amber "PADI update available" pill
+instead of inventing a new color), `components/tags-field.tsx` (chip input with debounced
+autocomplete, modeled on `dive-site-field.tsx`; normalizes case/whitespace on add and refuses the
+two reserved tag names), wired into `dive-form.tsx` (a Suunto-import merge always keeps the target
+dive's own tags — imports never carry tags, so there's nothing to choose between). Tag cloud +
+`?tag=` filter added to `/dives`; a compact top-12 cloud added to `/dashboard` (which already
+fetched the full dive list for its "recent dives" slice, so no extra query).
+
+WebKit e2e testing (`tests/e2e/tags.spec.ts`) caught a real bug before it shipped: rejecting a
+reserved tag name left the stale text sitting in the input, so the next keystroke glued onto it
+instead of starting fresh — fixed by always clearing the draft on submit, accepted or not. Also
+added integration tests (tag round-trip through create/update, `listUserTags` ranking/scoping) and
+unit tests (`lib/tags.ts`'s pure functions) and updated the existing dive_backup payload test/CSV
+templates (`scripts/notifications/templates.mjs`) for the new array-typed column. Full suite green
+except two pre-existing `registration.test.ts` failures confirmed (via `git stash`) to predate this
+change — a local env config gap unrelated to tags.

@@ -62,6 +62,7 @@ const DIVE_FIELD_LABELS = {
   updated_at: "Updated at",
   suunto_workout_key: "Suunto workout id",
   suunto_profile: "Suunto profile",
+  tags: "Tags",
 };
 
 // The depth profile is reproduced in full in the JSON attachment; the email body only counts its
@@ -96,6 +97,11 @@ function formatBodyValue(key, value) {
   if (key === "suunto_profile") {
     const points = Array.isArray(value?.points) ? value.points.length : Object.keys(value).length;
     return `${points} sample(s) (see the attached JSON)`;
+  }
+  // Rendered as "wreck, night" rather than the generic JSON.stringify fallback's `["wreck","night"]`
+  // -- the email body is meant to read like plain text, not a data dump.
+  if (key === "tags") {
+    return Array.isArray(value) && value.length > 0 ? value.join(", ") : null;
   }
   // Explicit false (e.g. hood/gloves/boots not worn) is real information, not absence -- shown
   // as "No" rather than dropped, unlike the detail page's summary view which only lists what

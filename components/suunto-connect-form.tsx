@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export type SuuntoConnectStatus = {
   status: "connected" | "needs_reconnect";
@@ -43,6 +44,7 @@ export function SuuntoConnectForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [daysBack, setDaysBack] = useState("10");
+  const [fetchMode, setFetchMode] = useState<"days" | "all">("days");
   const [showReconnectForm, setShowReconnectForm] = useState(false);
   const [fetchOpen, setFetchOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -81,23 +83,36 @@ export function SuuntoConnectForm({
   function handleFetch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const count = Number(daysBack);
-    if (!Number.isFinite(count)) return;
+    if (fetchMode === "days" && !Number.isFinite(count)) return;
 
     startTransition(async () => {
-      const result = await fetchSuuntoWorkoutsAction(count);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
+      try {
+        const result =
+          fetchMode === "all"
+            ? await fetchSuuntoWorkoutsAction({ mode: "all" })
+            : await fetchSuuntoWorkoutsAction({ mode: "days", daysBack: count });
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
 
-      const skipped = result.alreadySaved + result.alreadyStaged + result.skippedNonDives + result.failedExports;
-      toast.success(
-        `Checked ${result.checked} workouts from the selected time window: staged ${result.staged}${skipped ? `, skipped ${skipped}` : ""}.`,
-      );
-      setFetchOpen(false);
-      router.refresh();
-      if (result.nextImportId !== null) {
-        router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
+        if (result.remaining) {
+          toast.success(`Staged ${result.staged} so far — click Fetch workouts again to continue.`);
+        } else {
+          const skipped = result.alreadySaved + result.alreadyStaged + result.skippedNonDives + result.failedExports;
+          toast.success(
+            `Checked ${result.checked} workouts from the selected time window: staged ${result.staged}${skipped ? `, skipped ${skipped}` : ""}.`,
+          );
+        }
+        setFetchOpen(false);
+        router.refresh();
+        if (result.nextImportId !== null) {
+          router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
+        }
+      } catch {
+        // An all-time fetch can run for minutes, so a dropped connection (or a server action that
+        // rejects outright) is realistic enough to deserve a toast instead of an error boundary.
+        toast.error("Suunto import is temporarily unavailable. Please try again later.");
       }
     });
   }
@@ -136,25 +151,51 @@ export function SuuntoConnectForm({
                 <DialogHeader>
                   <DialogTitle>Fetch Suunto workouts</DialogTitle>
                   <DialogDescription>
-                    Choose how many recent days to check. Dive workouts that are already staged or
-                    saved are ignored.
+                    Check a recent window or your whole Suunto history. Dive workouts that are
+                    already staged or saved are ignored.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="suunto-limit">Recent days to check</Label>
-                  <Input
-                    id="suunto-limit"
-                    name="limit"
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={daysBack}
-                    onChange={(event) => setDaysBack(event.target.value)}
-                    required
-                  />
+                  <Label>Time range</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    value={fetchMode}
+                    onValueChange={(value) => value && setFetchMode(value as "days" | "all")}
+                    disabled={isPending}
+                  >
+                    <ToggleGroupItem value="days">Recent days</ToggleGroupItem>
+                    <ToggleGroupItem value="all">All time</ToggleGroupItem>
+                  </ToggleGroup>
                 </div>
+                {fetchMode === "days" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="suunto-limit">Recent days to check</Label>
+                    <Input
+                      id="suunto-limit"
+                      name="limit"
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={daysBack}
+                      onChange={(event) => setDaysBack(event.target.value)}
+                      required
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Fetches every dive workout in your Suunto history. This can take a while — for a
+                    large history you may need to click Fetch workouts more than once; each run picks
+                    up where the last one stopped.
+                  </p>
+                )}
                 <DialogFooter>
-                  <Button type="submit" disabled={isPending || Number(daysBack) < 1 || Number(daysBack) > 365}>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isPending || (fetchMode === "days" && (Number(daysBack) < 1 || Number(daysBack) > 365))
+                    }
+                  >
                     {isPending ? <Loader2 className="animate-spin" /> : null}
                     Fetch workouts
                   </Button>

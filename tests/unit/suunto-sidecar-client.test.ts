@@ -57,11 +57,44 @@ describe("suunto sidecar client", () => {
       res.end(JSON.stringify({ reason: "auth_expired", error: 'bad {"sessionJson":"abc"}' }));
     });
 
-    await expect(listSuuntoWorkouts("super-secret-session", 3)).rejects.toMatchObject({
+    await expect(listSuuntoWorkouts("super-secret-session", { daysBack: 3 })).rejects.toMatchObject({
       reason: "auth_expired",
       status: 401,
     });
-    await expect(listSuuntoWorkouts("super-secret-session", 3)).rejects.not.toThrow("abc");
+    await expect(listSuuntoWorkouts("super-secret-session", { daysBack: 3 })).rejects.not.toThrow("abc");
+  });
+
+  it("asks the sidecar for the whole history in all mode, without a bounded limit or since window", async () => {
+    let received: unknown = null;
+    process.env.SUUNTO_SIDECAR_URL = await listen(async (req, res) => {
+      expect(req.url).toBe("/workouts/list");
+      let body = "";
+      req.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+      await new Promise((resolve) => req.on("end", resolve));
+      received = JSON.parse(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ workouts: [{ key: "one" }, { key: "two" }] }));
+    });
+
+    await expect(listSuuntoWorkouts("super-secret-session", { all: true })).resolves.toEqual({
+      workouts: [{ key: "one" }, { key: "two" }],
+    });
+    expect(received).toEqual({ sessionJson: "super-secret-session", all: true });
+  });
+
+  it("sends the bounded recent-days window as a since/limit pair in days mode", async () => {
+    let received: unknown = null;
+    process.env.SUUNTO_SIDECAR_URL = await listen(async (req, res) => {
+      let body = "";
+      req.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+      await new Promise((resolve) => req.on("end", resolve));
+      received = JSON.parse(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ workouts: [] }));
+    });
+
+    await listSuuntoWorkouts("super-secret-session", { daysBack: 3 });
+    expect(received).toEqual({ sessionJson: "super-secret-session", limit: 100, since: "3d" });
   });
 
   it("rejects non-local sidecar URLs", async () => {

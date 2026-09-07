@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 let server;
 let tempDir;
 
-async function startServer(fakeTool) {
+async function startServer(fakeTool, extraEnv = {}) {
   const port = 49000 + Math.floor(Math.random() * 1000);
   server = spawn(process.execPath, ["scripts/suunto-sidecar/server.mjs"], {
     cwd: process.cwd(),
@@ -17,6 +17,7 @@ async function startServer(fakeTool) {
       SUUNTOOL_BIN: fakeTool,
       SUUNTO_SIDECAR_PORT: String(port),
       SUUNTO_SIDECAR_HOST: "127.0.0.1",
+      ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -58,6 +59,22 @@ if (args[0] === "version") {
   console.log(JSON.stringify({ payload: { workouts: [{ key: "6tv4q2ak4ksqlrth" }] } }));
 } else if (args.join(" ") === "workouts list --since 10d --limit 100 --format json") {
   console.log(JSON.stringify({ items: [{ key: "since-window" }] }));
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet") {
+  console.log(JSON.stringify({ key: "stream-one" }));
+  console.log(JSON.stringify({ key: "stream-two" }));
+  console.log(JSON.stringify({ key: "stream-three" }));
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since 30d") {
+  console.log(JSON.stringify({ key: "stream-since" }));
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since broken") {
+  console.log(JSON.stringify({ key: "stream-one" }));
+  console.log("{not json");
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since garbage") {
+  console.log("{not json");
+  console.log("also not json");
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since flood") {
+  for (let index = 0; index < 200; index += 1) {
+    console.log(JSON.stringify({ key: "flood-" + index, padding: "x".repeat(200) }));
+  }
 } else if (args[0] === "workouts" && args[1] === "export") {
   const dir = args[args.indexOf("--bundle") + 1];
   mkdirSync(dir, { recursive: true });
@@ -130,6 +147,70 @@ describe("suunto sidecar server", () => {
     });
     const bundle = JSON.parse(gunzipSync(Buffer.from(exportedJson.bundleBase64, "base64")).toString("utf8"));
     expect(bundle.files.map((file) => file.path)).toEqual(["workout.json", "workout.sml.json"]);
+  });
+
+  it("streams the whole history as NDJSON in all mode, with and without a since window", async () => {
+    const baseUrl = await startServer(await makeFakeTool());
+
+    const all = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true }),
+    });
+    expect(all.status).toBe(200);
+    expect(await all.json()).toEqual({
+      workouts: [{ key: "stream-one" }, { key: "stream-two" }, { key: "stream-three" }],
+    });
+
+    // `limit` is ignored in all mode -- --limit 0 (unbounded) is what auto-paginates.
+    const allSince = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "30d", limit: 2 }),
+    });
+    expect(await allSince.json()).toEqual({ workouts: [{ key: "stream-since" }] });
+  });
+
+  it("keeps the parseable workouts when only some NDJSON lines are malformed", async () => {
+    const baseUrl = await startServer(await makeFakeTool());
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "broken" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ workouts: [{ key: "stream-one" }] });
+  });
+
+  it("fails the all-mode listing when nothing in the stream parses", async () => {
+    const baseUrl = await startServer(await makeFakeTool());
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "garbage" }),
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ reason: "server" });
+  });
+
+  it("fails closed instead of truncating when an all-mode listing outgrows its stdout cap", async () => {
+    const baseUrl = await startServer(await makeFakeTool(), { SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES: "1000" });
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "flood" }),
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      reason: "bad_request",
+      error: "workout listing output is too large",
+    });
   });
 
   it("rejects oversized request bodies before spawning suuntool", async () => {

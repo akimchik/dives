@@ -83,6 +83,24 @@ export async function seedSuuntoDive(email: string, sml: unknown): Promise<{ div
 }
 
 /**
+ * Marks a user as Suunto-connected so the Integrations page renders the fetch dialog. The stored
+ * blobs are deliberately junk: rendering the connected state only reads `status`/timestamps, never
+ * decrypts, and there is no suuntool sidecar in the e2e environment anyway — a fetch submitted from
+ * this state is expected to come back as the "temporarily unavailable" error toast, which is exactly
+ * what proves the button reached the server action.
+ */
+export async function seedSuuntoIntegration(email: string): Promise<void> {
+  const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
+  if (user.rows.length === 0) throw new Error(`no user found for email ${email}`);
+
+  await pool.query(
+    `insert into suunto_integrations (user_id, email_hash, session_encrypted, status)
+     values ($1, $2, 'e2e-not-a-real-session', 'connected')`,
+    [user.rows[0].id, `e2e-${randomBytes(8).toString("hex")}`],
+  );
+}
+
+/**
  * Inserts a plain dive row directly (same rationale as seedSuuntoDive: driving dive creation
  * through the UI form races router.refresh()/router.push()'s client-side transition, which is
  * fine for specs that only create one dive but flaky for specs that immediately navigate

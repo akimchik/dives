@@ -159,9 +159,9 @@ describe("Suunto server actions", () => {
     expect(integration.rows[0].session_encrypted).not.toContain("do-not-store-me");
 
     listSuuntoWorkoutsMock.mockResolvedValue({ workouts: [] });
-    const fetched = await fetchSuuntoWorkoutsAction(3);
-    expect(fetched).toMatchObject({ ok: true, checked: 0, staged: 0 });
-    expect(listSuuntoWorkoutsMock).toHaveBeenCalledWith('{"session":"secret"}', 3);
+    const fetched = await fetchSuuntoWorkoutsAction({ mode: "days", daysBack: 3 });
+    expect(fetched).toMatchObject({ ok: true, checked: 0, staged: 0, remaining: false });
+    expect(listSuuntoWorkoutsMock).toHaveBeenCalledWith('{"session":"secret"}', { daysBack: 3 });
   });
 
   it("skips already staged/saved workout ids before exporting new workouts", async () => {
@@ -195,7 +195,7 @@ describe("Suunto server actions", () => {
       workoutSmlJson: smlFixture(newKey),
     });
 
-    const fetched = await fetchSuuntoWorkoutsAction(5);
+    const fetched = await fetchSuuntoWorkoutsAction({ mode: "days", daysBack: 5 });
     expect(fetched).toMatchObject({
       ok: true,
       checked: 3,
@@ -206,6 +206,117 @@ describe("Suunto server actions", () => {
     });
     expect(exportSuuntoWorkoutMock).toHaveBeenCalledTimes(1);
     expect(exportSuuntoWorkoutMock).toHaveBeenCalledWith('{"session":"fetch"}', newKey);
+  });
+
+  it("stages every workout the sidecar streams back in all-time mode", async () => {
+    const user = await loginAsNewUser();
+    suuntoLoginMock.mockResolvedValue({ sessionJson: "{\"session\":\"all\"}" });
+    await connectSuuntoAction("diver@aleksandr.vin", "correct-password");
+
+    const keys = [`all-a-${randomUUID()}`, `all-b-${randomUUID()}`, `all-c-${randomUUID()}`];
+    listSuuntoWorkoutsMock.mockResolvedValue({ workouts: keys.map((key) => ({ key })) });
+    exportSuuntoWorkoutMock.mockImplementation(async (_session: unknown, key: string) => ({
+      bundleBase64: Buffer.from("bundle").toString("base64"),
+      bundleEncoding: "json-files+gzip+base64",
+      workoutJson: { key },
+      workoutSmlJson: smlFixture(key),
+    }));
+
+    const fetched = await fetchSuuntoWorkoutsAction({ mode: "all" });
+
+    expect(fetched).toMatchObject({ ok: true, checked: 3, staged: 3, remaining: false });
+    expect(listSuuntoWorkoutsMock).toHaveBeenCalledWith('{"session":"all"}', { all: true });
+    const stagedRows = await getTestPool().query<{ count: number }>(
+      "select count(*)::int as count from suunto_imports where user_id = $1",
+      [user.id],
+    );
+    expect(stagedRows.rows[0].count).toBe(3);
+  });
+
+  it("rejects an unrecognised fetch mode instead of falling through to the all-time path", async () => {
+    await loginAsNewUser();
+    suuntoLoginMock.mockResolvedValue({ sessionJson: "{\"session\":\"mode\"}" });
+    await connectSuuntoAction("diver@aleksandr.vin", "correct-password");
+
+    // Server Action arguments are client-controlled, so this is reachable without going through the
+    // UI's toggle at all.
+    const fetched = await fetchSuuntoWorkoutsAction({ mode: "AL" } as unknown as { mode: "all" });
+
+    expect(fetched).toEqual({ ok: false, error: "Unsupported fetch mode.", reason: "bad_request" });
+    expect(listSuuntoWorkoutsMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a concurrent all-time fetch instead of double-exporting the same history", async () => {
+    await loginAsNewUser();
+    suuntoLoginMock.mockResolvedValue({ sessionJson: "{\"session\":\"lock\"}" });
+    await connectSuuntoAction("diver@aleksandr.vin", "correct-password");
+
+    // A slow listing holds the advisory lock for the duration of both calls -- same technique as
+    // tests/integration/padi-sync.test.ts's concurrent-sync test, just gating the sidecar client
+    // this action injects through vi.mock rather than PADI's injectable client.
+    let releaseFirstCall: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve;
+    });
+    listSuuntoWorkoutsMock.mockImplementation(async () => {
+      await gate;
+      return { workouts: [] };
+    });
+
+    const firstCall = fetchSuuntoWorkoutsAction({ mode: "all" });
+    // Give the first call a moment to acquire the lock before firing the second.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const second = await fetchSuuntoWorkoutsAction({ mode: "all" });
+    // Released in a finally so a failed assertion still unblocks the held first call, which would
+    // otherwise hang until the whole suite times out instead of failing here.
+    try {
+      expect(second).toEqual({
+        ok: false,
+        error: "An all-time Suunto fetch is already in progress.",
+        reason: "in_progress",
+      });
+    } finally {
+      releaseFirstCall();
+    }
+    expect((await firstCall).ok).toBe(true);
+  });
+
+  it("stops an all-time fetch on its wall-time budget and reports remaining work", async () => {
+    await loginAsNewUser();
+    suuntoLoginMock.mockResolvedValue({ sessionJson: "{\"session\":\"budget\"}" });
+    await connectSuuntoAction("diver@aleksandr.vin", "correct-password");
+
+    const keys = [`budget-a-${randomUUID()}`, `budget-b-${randomUUID()}`, `budget-c-${randomUUID()}`];
+    listSuuntoWorkoutsMock.mockResolvedValue({ workouts: keys.map((key) => ({ key })) });
+    exportSuuntoWorkoutMock.mockImplementation(async (_session: unknown, key: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        bundleBase64: Buffer.from("bundle").toString("base64"),
+        bundleEncoding: "json-files+gzip+base64",
+        workoutJson: { key },
+        workoutSmlJson: smlFixture(key),
+      };
+    });
+
+    process.env.SUUNTO_FETCH_ALL_BUDGET_MS = "20";
+    try {
+      const fetched = await fetchSuuntoWorkoutsAction({ mode: "all" });
+
+      expect(fetched).toMatchObject({ ok: true, remaining: true });
+      if (!fetched.ok) throw new Error("unreachable");
+      // At most one export can start inside a 20ms budget when each takes 50ms; which of "zero" or
+      // "one" it is depends on how long the preceding dedupe query took, so only the invariant
+      // "the loop stopped before working through all three" is asserted.
+      expect(fetched.staged).toBeLessThan(3);
+      // `checked` counts workouts actually examined, so a truncated run reports fewer than the three
+      // that were listed: the loop counts the candidate it bailed on and nothing after it, which
+      // makes it exactly one more than it managed to stage.
+      expect(fetched.checked).toBeLessThan(3);
+      expect(fetched.checked).toBe(fetched.staged + 1);
+    } finally {
+      delete process.env.SUUNTO_FETCH_ALL_BUDGET_MS;
+    }
   });
 
   it("returns the next staged import after deleting the current review item", async () => {

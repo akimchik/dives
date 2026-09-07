@@ -11,9 +11,17 @@ const PORT = Number(process.env.SUUNTO_SIDECAR_PORT || 4817);
 const SUUNTOOL = process.env.SUUNTOOL_BIN || "suuntool";
 const DEFAULT_TIMEOUT_MS = Number(process.env.SUUNTOOL_TIMEOUT_MS || 60_000);
 const EXPORT_TIMEOUT_MS = Number(process.env.SUUNTOOL_EXPORT_TIMEOUT_MS || 180_000);
+// `workouts list --stream --limit 0` auto-paginates the user's entire history, which can take far
+// longer than the single bounded page DEFAULT_TIMEOUT_MS is sized for.
+const LIST_ALL_TIMEOUT_MS = Number(process.env.SUUNTOOL_LIST_ALL_TIMEOUT_MS || 180_000);
 const MAX_REQUEST_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_REQUEST_BYTES || 1_000_000);
 const MAX_BUNDLE_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_BYTES || 25_000_000);
 const MAX_BUNDLE_FILES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_FILES || 20);
+// Ceiling on the one unbounded stdout path: `workouts list --stream --limit 0` streams the user's
+// entire workout history (not just dives) into memory, so it needs a cap of its own the way every
+// other buffer in this file has one. Only that call passes it; every other runSuuntool caller keeps
+// the historical uncapped behavior.
+const MAX_LIST_ALL_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES || 50_000_000);
 
 const EXIT_REASONS = new Map([
   [1, [502, "tool_error"]],
@@ -74,6 +82,25 @@ function extractWorkouts(parsed) {
   return candidates.find(Array.isArray) || [];
 }
 
+// `--stream` emits one workout per line instead of a single JSON blob. Unparseable lines are counted
+// rather than thrown on: failing a multi-thousand-workout history over a single bad line would throw
+// away all the progress made, so the caller decides (only "nothing parsed at all" is a hard error).
+// The offending line is never captured -- a count is enough, and redact() only masks known shapes.
+function parseNdjsonWorkouts(stdout) {
+  const workouts = [];
+  let malformedCount = 0;
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      workouts.push(JSON.parse(trimmed));
+    } catch {
+      malformedCount += 1;
+    }
+  }
+  return { workouts, malformedCount };
+}
+
 function json(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
@@ -107,21 +134,35 @@ async function withTempSession(sessionJson, run) {
   }
 }
 
-function runSuuntool(args, { sessionPath, stdin, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function runSuuntool(args, { sessionPath, stdin, timeoutMs = DEFAULT_TIMEOUT_MS, maxStdoutBytes } = {}) {
   return new Promise((resolve) => {
     const child = spawn(SUUNTOOL, args, {
       env: { ...process.env, SUUNTOOL_SESSION_FILE: sessionPath || process.env.SUUNTOOL_SESSION_FILE || "" },
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
+    let stdoutBytes = 0;
+    let stdoutOverflowed = false;
     let stderr = "";
     const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
 
-    child.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
+    child.stdout.on("data", (chunk) => {
+      if (stdoutOverflowed) return;
+      stdoutBytes += chunk.length;
+      if (maxStdoutBytes !== undefined && stdoutBytes > maxStdoutBytes) {
+        // Stop accumulating and kill the child: what we have is a truncated, unparseable prefix, so
+        // the caller must fail closed rather than treat it as the full history.
+        stdoutOverflowed = true;
+        stdout = "";
+        child.kill("SIGTERM");
+        return;
+      }
+      stdout += chunk.toString("utf8");
+    });
     child.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      resolve({ code: signal ? 6 : (code ?? 1), stdout, stderr });
+      resolve({ code: signal ? 6 : (code ?? 1), stdout, stderr, stdoutOverflowed });
     });
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -207,9 +248,52 @@ async function login(payload) {
 }
 
 async function listWorkouts(payload) {
+  const since = typeof payload.since === "string" && payload.since.trim() ? payload.since.trim() : null;
+
+  if (payload.all === true) {
+    return withTempSession(payload.sessionJson, async ({ sessionPath }) => {
+      // No --format here: --stream always emits NDJSON, so passing a format would imply a
+      // conflicting contract. --limit 0 makes the cap unbounded and auto-paginates every cursor.
+      // --quiet suppresses suuntool's non-error logs so nothing but NDJSON reaches stdout.
+      const args = ["workouts", "list", "--stream", "--limit", "0", "--quiet"];
+      if (since) args.push("--since", since);
+      logEvent("suunto.workouts.list_all.start", { since, hasSession: Boolean(payload.sessionJson) });
+      const result = await runSuuntool(args, {
+        sessionPath,
+        timeoutMs: LIST_ALL_TIMEOUT_MS,
+        maxStdoutBytes: MAX_LIST_ALL_BYTES,
+      });
+      logEvent("suunto.workouts.list_all.suuntool", {
+        since,
+        exitCode: result.code,
+        stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+        stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+        stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
+        stdoutOverflowed: result.stdoutOverflowed || undefined,
+      });
+      if (result.stdoutOverflowed) {
+        // Checked before assertOk: the kill above surfaces as a signal exit, and a size error is far
+        // more actionable than the timeout it would otherwise be reported as.
+        const error = new Error("workout listing output is too large");
+        error.status = 413;
+        error.reason = "bad_request";
+        throw error;
+      }
+      assertOk(result);
+      const { workouts, malformedCount } = parseNdjsonWorkouts(result.stdout);
+      logEvent("suunto.workouts.list_all.result", { since, workoutCount: workouts.length, malformedCount });
+      if (malformedCount > 0 && workouts.length === 0) {
+        const error = new Error("workout listing produced no parseable output");
+        error.status = 500;
+        error.reason = "server";
+        throw error;
+      }
+      return { workouts };
+    });
+  }
+
   const requestedLimit = Number(payload.limit || 10);
   const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 10));
-  const since = typeof payload.since === "string" && payload.since.trim() ? payload.since.trim() : null;
   return withTempSession(payload.sessionJson, async ({ sessionPath }) => {
     const args = ["workouts", "list", "--limit", String(limit), "--format", "json"];
     if (since) args.splice(2, 0, "--since", since);

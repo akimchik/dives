@@ -104,11 +104,18 @@ export async function suuntoLogin(email: string, password: string): Promise<Suun
   return callSidecar("/login", { email, password });
 }
 
+// Discriminated on purpose: a bounded recent-days window and an unbounded whole-history listing are
+// two different sidecar calls with two different timeouts, and mixing them would silently pick one.
 export async function listSuuntoWorkouts(
   sessionJson: string,
-  daysBack: number,
+  options: { daysBack: number } | { all: true },
 ): Promise<{ workouts: SuuntoWorkoutSummary[] }> {
-  const normalizedDaysBack = Number.isFinite(daysBack) ? Math.floor(daysBack) : 10;
+  if ("all" in options) {
+    // Above the sidecar's own SUUNTOOL_LIST_ALL_TIMEOUT_MS (180s) so the client never aborts before
+    // the sidecar has had a chance to return or fail on its own.
+    return callSidecar("/workouts/list", { sessionJson, all: true }, 200_000);
+  }
+  const normalizedDaysBack = Number.isFinite(options.daysBack) ? Math.floor(options.daysBack) : 10;
   const since = `${Math.max(1, normalizedDaysBack)}d`;
   return callSidecar("/workouts/list", { sessionJson, limit: 100, since });
 }

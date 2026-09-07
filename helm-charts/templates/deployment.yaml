@@ -196,12 +196,16 @@ spec:
               value: {{ .Values.suuntoSidecar.timeoutMs | quote }}
             - name: SUUNTOOL_EXPORT_TIMEOUT_MS
               value: {{ .Values.suuntoSidecar.exportTimeoutMs | quote }}
+            - name: SUUNTOOL_LIST_ALL_TIMEOUT_MS
+              value: {{ .Values.suuntoSidecar.listAllTimeoutMs | quote }}
             - name: SUUNTO_SIDECAR_MAX_REQUEST_BYTES
               value: {{ .Values.suuntoSidecar.maxRequestBytes | quote }}
             - name: SUUNTO_SIDECAR_MAX_BUNDLE_BYTES
               value: {{ .Values.suuntoSidecar.maxBundleBytes | quote }}
             - name: SUUNTO_SIDECAR_MAX_BUNDLE_FILES
               value: {{ .Values.suuntoSidecar.maxBundleFiles | quote }}
+            - name: SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES
+              value: {{ .Values.suuntoSidecar.maxListAllBytes | quote }}
           ports:
             - name: suunto
               containerPort: {{ .Values.suuntoSidecar.port }}

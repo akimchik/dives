@@ -575,3 +575,64 @@ conditions radar shows all three series with a legend. Updated
 typecheck, lint, `knip`, unit (135/135), full WebKit e2e (23/23, one
 known-flaky navigation-race test in the suite re-confirmed passing in
 isolation, unrelated to this change).
+
+## 2026-09-07 21:56 — Fetch all Suunto workouts (issue #24)
+
+> https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/24 do this
+
+Given via `/autopilot <url> do this`.
+
+The staged-import/review/merge/delete/continuation flow the issue describes was
+already implemented; the only real gap was that the fetch itself was bounded to
+1–365 days back and capped at 100 workouts per call. Added an "All time" fetch
+mode: the sidecar gains a `payload.all` branch running
+`suuntool workouts list --stream --limit 0` (auto-paginates the whole history,
+NDJSON out) under its own `SUUNTOOL_LIST_ALL_TIMEOUT_MS`, and
+`listSuuntoWorkouts`/`fetchSuuntoWorkoutsAction` became discriminated
+`{ daysBack } | { all: true }` / `{ mode: "days" } | { mode: "all" }` request
+shapes. The all-time path copies `lib/padi/sync.ts`'s two safety mechanisms —
+a non-blocking `pg_try_advisory_lock` on its own classid (84272, not PADI's
+84271) returning `reason: "in_progress"`, and a wall-time budget checked only
+before starting each export — so a huge history returns `remaining: true` and
+the user clicks Fetch again, which the existing dedupe already makes
+idempotent. No new table, batch entity or background queue (explicit non-goals).
+Both fetch dialogs got a `ToggleGroup` time-range toggle and a remaining-aware
+toast copying `components/sync-padi-button.tsx`.
+
+Verified: typecheck + 139 unit tests green, 91 Postgres integration tests green
+(including new all-mode happy-path, concurrent-lock and budget cases, re-run 3x
+for stability), eslint and knip clean.
+
+## 2026-09-07 22:10 — Apply review findings for fetch-all Suunto workouts (issue #24)
+
+> A code-reviewer and a security-reviewer both reviewed the uncommitted diff and
+> found real issues, none blocking but all worth fixing. Apply every fix.
+
+Ten review items, all applied. Sidecar: the one unbounded stdout path
+(`workouts list --stream --limit 0`) now has its own `MAX_LIST_ALL_BYTES`
+ceiling that kills the child and fails closed with a 413 instead of parsing a
+truncated prefix, `runSuuntool` grew an opt-in `maxStdoutBytes` that no other
+call site passes, and `SUUNTOOL_LIST_ALL_TIMEOUT_MS`/
+`SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES` are templated into the chart alongside
+their siblings. `parseNdjsonWorkouts` now counts malformed lines instead of
+throwing on the first one (logged as a count, never the line content) and only
+errors when nothing parsed at all, so one bad line can't throw away a whole
+multi-thousand-workout fetch; `--quiet` was added as insurance against
+informational lines. Action: the `mode` discriminant is validated at runtime
+(Server Action args are client-controlled, and an unrecognised mode was falling
+through to the expensive all-time path), the wall-time budget now starts before
+the listing so it bounds the whole request and the advisory lock's hold time
+rather than only the staging loop, `checked` increments per iteration instead of
+being pre-seeded with the listed count, plus a `rows[0]?.` guard, a
+scope-accurate `in_progress` message and an upper clamp on the test-only budget
+override. UI: both fetch dialogs wrap the server-action call in try/catch so a
+rejected promise toasts instead of hitting an error boundary, and the "click
+again" toast now names the button that actually resubmits ("Fetch workouts").
+Tests: the budget test asserts the corrected smaller `checked`, the concurrency
+test releases its gate in a `finally` so an assertion failure can't hang the
+suite, the e2e comment no longer overclaims what a fake-session submit proves,
+and new cases cover the byte cap, partial-garbage NDJSON and the mode guard.
+
+Verified: typecheck + 141 unit tests green, 92 Postgres integration tests green
+(suunto-actions re-run 5x for stability), 2/2 WebKit e2e green, eslint and knip
+clean.

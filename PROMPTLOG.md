@@ -636,3 +636,28 @@ and new cases cover the byte cap, partial-garbage NDJSON and the mode guard.
 Verified: typecheck + 141 unit tests green, 92 Postgres integration tests green
 (suunto-actions re-run 5x for stability), 2/2 WebKit e2e green, eslint and knip
 clean.
+
+## 2026-09-07 22:27 - Fix all-time Suunto fetch crashing in production
+
+> I tried it and it shows an error on UI after some time, that suunto is
+> temporarily unavail. And in sidecar logs are these:
+> {"event":"suunto.workouts.list_all.suuntool",...,"exitCode":5,"stdoutBytes":1217536,...,"stderrPreview":"BAD_ENVELOPE: unexpected end of JSON input\n"}
+> {"event":"suunto.request.error",...,"status":500,"reason":"server","durationMs":30031,...}
+
+Root cause: suuntool has its own internal HTTP client timeout (30s by
+default, per its own `--help`), entirely separate from the sidecar's
+`SUUNTOOL_LIST_ALL_TIMEOUT_MS` (180s) Node-level kill timer. The all-time
+fetch never passed `--timeout` explicitly, so suuntool's 30s default
+governed regardless of what the sidecar budgeted, and the failing request
+died at exactly 30031ms mid-stream after already forwarding ~1.2MB of valid
+NDJSON. Fix: pass `--timeout` explicitly, sized 10s under
+`SUUNTOOL_LIST_ALL_TIMEOUT_MS` (`LIST_ALL_HTTP_TIMEOUT_MS`) so suuntool
+aborts itself cleanly well before the Node-level SIGTERM would. Also added a
+resilience improvement for the case where a transient hiccup still
+interrupts the stream after a generous timeout: if suuntool exits non-zero
+with a `server`/`timeout`/`network`-classified reason but had already
+streamed complete, parseable lines, those are now salvaged and returned as a
+partial listing instead of discarding all progress (auth/usage failures
+never salvage). Added regression tests for both the exact reproduced failure
+shape and the auth-failure non-salvage case; 143 unit tests green, lint/knip
+clean.

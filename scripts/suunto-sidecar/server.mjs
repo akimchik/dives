@@ -14,6 +14,14 @@ const EXPORT_TIMEOUT_MS = Number(process.env.SUUNTOOL_EXPORT_TIMEOUT_MS || 180_0
 // `workouts list --stream --limit 0` auto-paginates the user's entire history, which can take far
 // longer than the single bounded page DEFAULT_TIMEOUT_MS is sized for.
 const LIST_ALL_TIMEOUT_MS = Number(process.env.SUUNTOOL_LIST_ALL_TIMEOUT_MS || 180_000);
+// suuntool's OWN --timeout flag (its --help: "HTTP timeout (default 30s)") governs its internal
+// HTTP client and is entirely separate from LIST_ALL_TIMEOUT_MS above, which only bounds how long
+// this Node process waits before SIGTERM-ing the child. Never passing --timeout meant a real "all
+// time" fetch died at exactly suuntool's 30s default mid-stream ("BAD_ENVELOPE: unexpected end of
+// JSON input") despite LIST_ALL_TIMEOUT_MS budgeting 180s for it -- that budget never got a chance
+// to matter. Sized 10s under LIST_ALL_TIMEOUT_MS so suuntool aborts itself cleanly (a parseable
+// exit code) before the Node-level kill would fire.
+const LIST_ALL_HTTP_TIMEOUT_MS = Math.max(5_000, LIST_ALL_TIMEOUT_MS - 10_000);
 const MAX_REQUEST_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_REQUEST_BYTES || 1_000_000);
 const MAX_BUNDLE_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_BYTES || 25_000_000);
 const MAX_BUNDLE_FILES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_FILES || 20);
@@ -255,7 +263,17 @@ async function listWorkouts(payload) {
       // No --format here: --stream always emits NDJSON, so passing a format would imply a
       // conflicting contract. --limit 0 makes the cap unbounded and auto-paginates every cursor.
       // --quiet suppresses suuntool's non-error logs so nothing but NDJSON reaches stdout.
-      const args = ["workouts", "list", "--stream", "--limit", "0", "--quiet"];
+      // --timeout overrides suuntool's own 30s default -- see LIST_ALL_HTTP_TIMEOUT_MS above.
+      const args = [
+        "workouts",
+        "list",
+        "--stream",
+        "--limit",
+        "0",
+        "--quiet",
+        "--timeout",
+        `${LIST_ALL_HTTP_TIMEOUT_MS}ms`,
+      ];
       if (since) args.push("--since", since);
       logEvent("suunto.workouts.list_all.start", { since, hasSession: Boolean(payload.sessionJson) });
       const result = await runSuuntool(args, {
@@ -279,9 +297,29 @@ async function listWorkouts(payload) {
         error.reason = "bad_request";
         throw error;
       }
-      assertOk(result);
+
       const { workouts, malformedCount } = parseNdjsonWorkouts(result.stdout);
-      logEvent("suunto.workouts.list_all.result", { since, workoutCount: workouts.length, malformedCount });
+      const failureReason = result.code !== 0 ? (EXIT_REASONS.get(result.code) ?? [502, "tool_error"])[1] : null;
+      // suuntool's own auto-pagination can still be interrupted mid-flight by a transient
+      // server/network hiccup even with a generous --timeout. If it had already streamed complete,
+      // parseable lines before dying, that's real data the caller already dedupes safely against --
+      // surface it as a (possibly partial) listing instead of discarding it, matching the "click
+      // again to continue" flow the caller already expects from a wall-time-budgeted fetch. Auth/
+      // usage failures (exit 4/2) never produce useful partial output and must still hard-fail.
+      const salvaged =
+        failureReason !== null &&
+        workouts.length > 0 &&
+        (failureReason === "server" || failureReason === "timeout" || failureReason === "network");
+      logEvent("suunto.workouts.list_all.result", {
+        since,
+        exitCode: result.code,
+        workoutCount: workouts.length,
+        malformedCount,
+        salvaged: salvaged || undefined,
+      });
+      if (result.code !== 0 && !salvaged) {
+        assertOk(result);
+      }
       if (malformedCount > 0 && workouts.length === 0) {
         const error = new Error("workout listing produced no parseable output");
         error.status = 500;

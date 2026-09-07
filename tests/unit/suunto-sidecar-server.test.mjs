@@ -59,22 +59,34 @@ if (args[0] === "version") {
   console.log(JSON.stringify({ payload: { workouts: [{ key: "6tv4q2ak4ksqlrth" }] } }));
 } else if (args.join(" ") === "workouts list --since 10d --limit 100 --format json") {
   console.log(JSON.stringify({ items: [{ key: "since-window" }] }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet") {
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms") {
   console.log(JSON.stringify({ key: "stream-one" }));
   console.log(JSON.stringify({ key: "stream-two" }));
   console.log(JSON.stringify({ key: "stream-three" }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since 30d") {
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since 30d") {
   console.log(JSON.stringify({ key: "stream-since" }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since broken") {
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since broken") {
   console.log(JSON.stringify({ key: "stream-one" }));
   console.log("{not json");
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since garbage") {
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since garbage") {
   console.log("{not json");
   console.log("also not json");
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --since flood") {
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since flood") {
   for (let index = 0; index < 200; index += 1) {
     console.log(JSON.stringify({ key: "flood-" + index, padding: "x".repeat(200) }));
   }
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since mid-stream-drop") {
+  // Reproduces a real production failure: suuntool streams some complete, valid lines then its own
+  // internal HTTP client dies mid-response ("BAD_ENVELOPE: unexpected end of JSON input", exit 5).
+  console.log(JSON.stringify({ key: "salvage-one" }));
+  console.log(JSON.stringify({ key: "salvage-two" }));
+  console.error("BAD_ENVELOPE: unexpected end of JSON input");
+  process.exit(5);
+} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since auth-drop") {
+  // Same non-zero exit shape, but auth failures must never be treated as salvageable partial data.
+  console.log(JSON.stringify({ key: "salvage-one" }));
+  console.error("AUTH_EXPIRED: session expired mid-stream");
+  process.exit(4);
 } else if (args[0] === "workouts" && args[1] === "export") {
   const dir = args[args.indexOf("--bundle") + 1];
   mkdirSync(dir, { recursive: true });
@@ -195,6 +207,34 @@ describe("suunto sidecar server", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({ reason: "server" });
+  });
+
+  it("salvages already-streamed workouts when suuntool dies mid-stream with a transient error", async () => {
+    const baseUrl = await startServer(await makeFakeTool());
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "mid-stream-drop" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      workouts: [{ key: "salvage-one" }, { key: "salvage-two" }],
+    });
+  });
+
+  it("does not salvage partial output when suuntool dies on an auth failure", async () => {
+    const baseUrl = await startServer(await makeFakeTool());
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "auth-drop" }),
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ reason: "auth_expired" });
   });
 
   it("fails closed instead of truncating when an all-mode listing outgrows its stdout cap", async () => {

@@ -59,33 +59,25 @@ if (args[0] === "version") {
   console.log(JSON.stringify({ payload: { workouts: [{ key: "6tv4q2ak4ksqlrth" }] } }));
 } else if (args.join(" ") === "workouts list --since 10d --limit 100 --format json") {
   console.log(JSON.stringify({ items: [{ key: "since-window" }] }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms") {
-  console.log(JSON.stringify({ key: "stream-one" }));
-  console.log(JSON.stringify({ key: "stream-two" }));
-  console.log(JSON.stringify({ key: "stream-three" }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since 30d") {
-  console.log(JSON.stringify({ key: "stream-since" }));
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since broken") {
-  console.log(JSON.stringify({ key: "stream-one" }));
-  console.log("{not json");
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since garbage") {
-  console.log("{not json");
-  console.log("also not json");
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since flood") {
-  for (let index = 0; index < 200; index += 1) {
-    console.log(JSON.stringify({ key: "flood-" + index, padding: "x".repeat(200) }));
-  }
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since mid-stream-drop") {
-  // Reproduces a real production failure: suuntool streams some complete, valid lines then its own
-  // internal HTTP client dies mid-response ("BAD_ENVELOPE: unexpected end of JSON input", exit 5).
-  console.log(JSON.stringify({ key: "salvage-one" }));
-  console.log(JSON.stringify({ key: "salvage-two" }));
+} else if (args.join(" ") === "workouts list --since two-page --limit 100 --offset 0 --format json") {
+  console.log(JSON.stringify({ workouts: Array.from({ length: 100 }, (_, i) => ({ key: "page0-" + i })) }));
+} else if (args.join(" ") === "workouts list --since two-page --limit 100 --offset 100 --format json") {
+  console.log(JSON.stringify({ workouts: [{ key: "page1-last" }] }));
+} else if (args.join(" ") === "workouts list --since first-page-fails --limit 100 --offset 0 --format json") {
+  console.error("SERVER_ERROR: upstream 500");
+  process.exit(5);
+} else if (args.join(" ") === "workouts list --since mid-pagination-drop --limit 100 --offset 0 --format json") {
+  console.log(JSON.stringify({ workouts: Array.from({ length: 100 }, (_, i) => ({ key: "page0-" + i })) }));
+} else if (args.join(" ") === "workouts list --since mid-pagination-drop --limit 100 --offset 100 --format json") {
+  // Reproduces the real production failure: many pages already fetched fine, then one page dies
+  // ("BAD_ENVELOPE: unexpected end of JSON input", exit 5) -- a transient hiccup, not auth/usage.
   console.error("BAD_ENVELOPE: unexpected end of JSON input");
   process.exit(5);
-} else if (args.join(" ") === "workouts list --stream --limit 0 --quiet --timeout 170000ms --since auth-drop") {
+} else if (args.join(" ") === "workouts list --since mid-pagination-auth-drop --limit 100 --offset 0 --format json") {
+  console.log(JSON.stringify({ workouts: Array.from({ length: 100 }, (_, i) => ({ key: "page0-" + i })) }));
+} else if (args.join(" ") === "workouts list --since mid-pagination-auth-drop --limit 100 --offset 100 --format json") {
   // Same non-zero exit shape, but auth failures must never be treated as salvageable partial data.
-  console.log(JSON.stringify({ key: "salvage-one" }));
-  console.error("AUTH_EXPIRED: session expired mid-stream");
+  console.error("AUTH_EXPIRED: session expired mid-pagination");
   process.exit(4);
 } else if (args[0] === "workouts" && args[1] === "export") {
   const dir = args[args.indexOf("--bundle") + 1];
@@ -161,95 +153,91 @@ describe("suunto sidecar server", () => {
     expect(bundle.files.map((file) => file.path)).toEqual(["workout.json", "workout.sml.json"]);
   });
 
-  it("streams the whole history as NDJSON in all mode, with and without a since window", async () => {
-    const baseUrl = await startServer(await makeFakeTool());
-
-    const all = await fetch(`${baseUrl}/workouts/list`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true }),
-    });
-    expect(all.status).toBe(200);
-    expect(await all.json()).toEqual({
-      workouts: [{ key: "stream-one" }, { key: "stream-two" }, { key: "stream-three" }],
-    });
-
-    // `limit` is ignored in all mode -- --limit 0 (unbounded) is what auto-paginates.
-    const allSince = await fetch(`${baseUrl}/workouts/list`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "30d", limit: 2 }),
-    });
-    expect(await allSince.json()).toEqual({ workouts: [{ key: "stream-since" }] });
-  });
-
-  it("keeps the parseable workouts when only some NDJSON lines are malformed", async () => {
+  it("paginates the whole history in all mode with --offset, stopping at the short last page", async () => {
     const baseUrl = await startServer(await makeFakeTool());
 
     const response = await fetch(`${baseUrl}/workouts/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "broken" }),
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "two-page" }),
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ workouts: [{ key: "stream-one" }] });
+    const { workouts } = await response.json();
+    expect(workouts).toHaveLength(101);
+    expect(workouts[0]).toEqual({ key: "page0-0" });
+    expect(workouts[workouts.length - 1]).toEqual({ key: "page1-last" });
   });
 
-  it("fails the all-mode listing when nothing in the stream parses", async () => {
+  it("fails the all-mode listing when the very first page fails", async () => {
     const baseUrl = await startServer(await makeFakeTool());
 
     const response = await fetch(`${baseUrl}/workouts/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "garbage" }),
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "first-page-fails" }),
     });
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({ reason: "server" });
   });
 
-  it("salvages already-streamed workouts when suuntool dies mid-stream with a transient error", async () => {
+  it("salvages already-paginated pages when a later page dies with a transient error", async () => {
     const baseUrl = await startServer(await makeFakeTool());
 
     const response = await fetch(`${baseUrl}/workouts/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "mid-stream-drop" }),
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "mid-pagination-drop" }),
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      workouts: [{ key: "salvage-one" }, { key: "salvage-two" }],
-    });
+    const { workouts } = await response.json();
+    expect(workouts).toHaveLength(100);
+    expect(workouts[0]).toEqual({ key: "page0-0" });
   });
 
-  it("does not salvage partial output when suuntool dies on an auth failure", async () => {
+  it("does not salvage partial output when a later page dies on an auth failure", async () => {
     const baseUrl = await startServer(await makeFakeTool());
 
     const response = await fetch(`${baseUrl}/workouts/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "auth-drop" }),
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "mid-pagination-auth-drop" }),
     });
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({ reason: "auth_expired" });
   });
 
-  it("fails closed instead of truncating when an all-mode listing outgrows its stdout cap", async () => {
-    const baseUrl = await startServer(await makeFakeTool(), { SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES: "1000" });
+  it("returns whatever was paginated so far once the loop's own wall-time budget elapses", async () => {
+    // A deadline already in the past forces the very first budget check (before any page is
+    // fetched) to trip deterministically, rather than racing a short-but-positive timeout.
+    const baseUrl = await startServer(await makeFakeTool(), { SUUNTOOL_LIST_ALL_TIMEOUT_MS: "-1000" });
 
     const response = await fetch(`${baseUrl}/workouts/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionJson: "{}", all: true, since: "flood" }),
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "two-page" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ workouts: [] });
+  });
+
+  it("fails closed instead of accumulating unbounded pages past its result-count cap", async () => {
+    const baseUrl = await startServer(await makeFakeTool(), { SUUNTO_SIDECAR_MAX_LIST_ALL_WORKOUTS: "1" });
+
+    const response = await fetch(`${baseUrl}/workouts/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionJson: "{}", all: true, since: "two-page" }),
     });
 
     expect(response.status).toBe(413);
     await expect(response.json()).resolves.toMatchObject({
       reason: "bad_request",
-      error: "workout listing output is too large",
+      error: "workout listing has too many results",
     });
   });
 

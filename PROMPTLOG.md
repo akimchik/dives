@@ -661,3 +661,40 @@ partial listing instead of discarding all progress (auth/usage failures
 never salvage). Added regression tests for both the exact reproduced failure
 shape and the auth-failure non-salvage case; 143 unit tests green, lint/knip
 clean.
+
+## 2026-09-07 22:50 - Same problem after --timeout fix, redesign to avoid --stream entirely
+
+> same problem: {"event":"suunto.workouts.list_all.suuntool",...,"exitCode":5,
+> "stdoutBytes":7305216,...,"stderrPreview":"BAD_ENVELOPE: unexpected end of
+> JSON input\n"} {"event":"suunto.workouts.list_all.result",...,"exitCode":5,
+> "workoutCount":9600,"malformedCount":0,"salvaged":true}
+> {"event":"suunto.request.ok",...,"durationMs":170167}
+> ??
+
+The previous fix (pass suuntool's own `--timeout` explicitly) shipped and
+took effect -- the failure moved from ~30s to ~170167ms, landing almost
+exactly on the new explicit `--timeout` value instead of suuntool's old 30s
+default. That proved the real problem: `--timeout` only delays the same
+`BAD_ENVELOPE` truncation, it doesn't prevent it, because one continuous
+`--stream --limit 0` HTTP operation genuinely can't finish for a large
+enough history (9,600 activities here) no matter how long it's allowed to
+run. Salvage kicked in and returned the 9,600 already-streamed workouts with
+a 200, so the listing itself didn't error -- but the user still saw
+"temporarily unavailable" downstream (the staging loop's own 90s wall-time
+budget had been computed *before* this 170s listing call even started, so it
+was already long expired by the time staging began).
+
+Redesigned: abandoned `--stream --limit 0` entirely. "All time" now
+paginates the sidecar's own already-reliable bounded single-page call
+(`--limit 100 --offset N`, looped) instead of relying on suuntool's internal
+auto-pagination. Each individual call is exactly as reliable as the
+"recent days" mode's existing call. A later page's transient failure
+salvages pages already collected; the loop's own wall-clock budget (still
+`SUUNTOOL_LIST_ALL_TIMEOUT_MS`, 180s) returns whatever's accumulated so far
+if it elapses mid-pagination, rather than losing everything. Removed the
+now-obsolete NDJSON parsing, stdout byte cap, and `--timeout` derivation;
+added a result-count cap (`SUUNTO_SIDECAR_MAX_LIST_ALL_WORKOUTS`, 20,000)
+since pagination has no other natural ceiling. The external contract
+(`{ workouts: [...] }`) is unchanged, so no changes were needed above the
+sidecar. 143 unit tests green (rewrote the all-mode sidecar tests for the
+new pagination shape), lint/knip clean, helm template verified.

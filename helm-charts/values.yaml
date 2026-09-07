@@ -117,13 +117,14 @@ suuntoSidecar:
   suuntoolBin: "suuntool"
   timeoutMs: "60000"
   exportTimeoutMs: "180000"
-  # "All time" listings auto-paginate the whole history, so they get their own (longer) timeout and
-  # their own stdout ceiling instead of borrowing the single-page ones above.
+  # "All time" listings paginate the whole history with the single-page call above, looped -- so
+  # they get their own (longer) total-loop timeout and their own result-count ceiling instead of
+  # borrowing the single-page ones.
   listAllTimeoutMs: "180000"
   maxRequestBytes: "1000000"
   maxBundleBytes: "25000000"
   maxBundleFiles: "20"
-  maxListAllBytes: "50000000"
+  maxListAllWorkouts: "20000"
   resources:
     requests:
       cpu: "50m"

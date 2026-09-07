@@ -11,25 +11,26 @@ const PORT = Number(process.env.SUUNTO_SIDECAR_PORT || 4817);
 const SUUNTOOL = process.env.SUUNTOOL_BIN || "suuntool";
 const DEFAULT_TIMEOUT_MS = Number(process.env.SUUNTOOL_TIMEOUT_MS || 60_000);
 const EXPORT_TIMEOUT_MS = Number(process.env.SUUNTOOL_EXPORT_TIMEOUT_MS || 180_000);
-// `workouts list --stream --limit 0` auto-paginates the user's entire history, which can take far
-// longer than the single bounded page DEFAULT_TIMEOUT_MS is sized for.
+// "All time" fetches the user's entire history by paginating the SAME bounded, single-page call the
+// "recent days" mode already uses (proven reliable), just looping with an increasing --offset,
+// rather than suuntool's own `--stream --limit 0` auto-pagination. That auto-pagination turned out
+// to be fundamentally unreliable for a large real history: a production fetch with ~9,600 activities
+// died with "BAD_ENVELOPE: unexpected end of JSON input" first at suuntool's own 30s default HTTP
+// timeout, then again at an explicit 170s --timeout -- proving --timeout only delayed the same
+// failure rather than fixing it, since one continuous multi-minute streaming HTTP operation was
+// never going to reliably finish for a large-enough history no matter how long it was allowed to
+// run. LIST_ALL_TIMEOUT_MS now bounds the total wall time of the whole *pagination loop* (checked
+// between pages, not inside any single runSuuntool call).
 const LIST_ALL_TIMEOUT_MS = Number(process.env.SUUNTOOL_LIST_ALL_TIMEOUT_MS || 180_000);
-// suuntool's OWN --timeout flag (its --help: "HTTP timeout (default 30s)") governs its internal
-// HTTP client and is entirely separate from LIST_ALL_TIMEOUT_MS above, which only bounds how long
-// this Node process waits before SIGTERM-ing the child. Never passing --timeout meant a real "all
-// time" fetch died at exactly suuntool's 30s default mid-stream ("BAD_ENVELOPE: unexpected end of
-// JSON input") despite LIST_ALL_TIMEOUT_MS budgeting 180s for it -- that budget never got a chance
-// to matter. Sized 10s under LIST_ALL_TIMEOUT_MS so suuntool aborts itself cleanly (a parseable
-// exit code) before the Node-level kill would fire.
-const LIST_ALL_HTTP_TIMEOUT_MS = Math.max(5_000, LIST_ALL_TIMEOUT_MS - 10_000);
+// Matches the server's own per-page ceiling (see the bounded branch of listWorkouts below).
+const LIST_ALL_PAGE_SIZE = 100;
 const MAX_REQUEST_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_REQUEST_BYTES || 1_000_000);
 const MAX_BUNDLE_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_BYTES || 25_000_000);
 const MAX_BUNDLE_FILES = Number(process.env.SUUNTO_SIDECAR_MAX_BUNDLE_FILES || 20);
-// Ceiling on the one unbounded stdout path: `workouts list --stream --limit 0` streams the user's
-// entire workout history (not just dives) into memory, so it needs a cap of its own the way every
-// other buffer in this file has one. Only that call passes it; every other runSuuntool caller keeps
-// the historical uncapped behavior.
-const MAX_LIST_ALL_BYTES = Number(process.env.SUUNTO_SIDECAR_MAX_LIST_ALL_BYTES || 50_000_000);
+// Ceiling on the one path whose in-memory accumulation isn't bounded by a single small page: "all
+// time" pagination keeps appending pages (of real activities, not just dives) until the loop's own
+// wall-time deadline. A hard count cap is a backstop against an extreme history ballooning memory.
+const MAX_LIST_ALL_WORKOUTS = Number(process.env.SUUNTO_SIDECAR_MAX_LIST_ALL_WORKOUTS || 20_000);
 
 const EXIT_REASONS = new Map([
   [1, [502, "tool_error"]],
@@ -90,25 +91,6 @@ function extractWorkouts(parsed) {
   return candidates.find(Array.isArray) || [];
 }
 
-// `--stream` emits one workout per line instead of a single JSON blob. Unparseable lines are counted
-// rather than thrown on: failing a multi-thousand-workout history over a single bad line would throw
-// away all the progress made, so the caller decides (only "nothing parsed at all" is a hard error).
-// The offending line is never captured -- a count is enough, and redact() only masks known shapes.
-function parseNdjsonWorkouts(stdout) {
-  const workouts = [];
-  let malformedCount = 0;
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      workouts.push(JSON.parse(trimmed));
-    } catch {
-      malformedCount += 1;
-    }
-  }
-  return { workouts, malformedCount };
-}
-
 function json(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
@@ -142,35 +124,21 @@ async function withTempSession(sessionJson, run) {
   }
 }
 
-function runSuuntool(args, { sessionPath, stdin, timeoutMs = DEFAULT_TIMEOUT_MS, maxStdoutBytes } = {}) {
+function runSuuntool(args, { sessionPath, stdin, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     const child = spawn(SUUNTOOL, args, {
       env: { ...process.env, SUUNTOOL_SESSION_FILE: sessionPath || process.env.SUUNTOOL_SESSION_FILE || "" },
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
-    let stdoutBytes = 0;
-    let stdoutOverflowed = false;
     let stderr = "";
     const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
 
-    child.stdout.on("data", (chunk) => {
-      if (stdoutOverflowed) return;
-      stdoutBytes += chunk.length;
-      if (maxStdoutBytes !== undefined && stdoutBytes > maxStdoutBytes) {
-        // Stop accumulating and kill the child: what we have is a truncated, unparseable prefix, so
-        // the caller must fail closed rather than treat it as the full history.
-        stdoutOverflowed = true;
-        stdout = "";
-        child.kill("SIGTERM");
-        return;
-      }
-      stdout += chunk.toString("utf8");
-    });
+    child.stdout.on("data", (chunk) => (stdout += chunk.toString("utf8")));
     child.stderr.on("data", (chunk) => (stderr += chunk.toString("utf8")));
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      resolve({ code: signal ? 6 : (code ?? 1), stdout, stderr, stdoutOverflowed });
+      resolve({ code: signal ? 6 : (code ?? 1), stdout, stderr });
     });
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -260,73 +228,62 @@ async function listWorkouts(payload) {
 
   if (payload.all === true) {
     return withTempSession(payload.sessionJson, async ({ sessionPath }) => {
-      // No --format here: --stream always emits NDJSON, so passing a format would imply a
-      // conflicting contract. --limit 0 makes the cap unbounded and auto-paginates every cursor.
-      // --quiet suppresses suuntool's non-error logs so nothing but NDJSON reaches stdout.
-      // --timeout overrides suuntool's own 30s default -- see LIST_ALL_HTTP_TIMEOUT_MS above.
-      const args = [
-        "workouts",
-        "list",
-        "--stream",
-        "--limit",
-        "0",
-        "--quiet",
-        "--timeout",
-        `${LIST_ALL_HTTP_TIMEOUT_MS}ms`,
-      ];
-      if (since) args.push("--since", since);
+      const workouts = [];
+      let offset = 0;
+      const deadline = Date.now() + LIST_ALL_TIMEOUT_MS;
       logEvent("suunto.workouts.list_all.start", { since, hasSession: Boolean(payload.sessionJson) });
-      const result = await runSuuntool(args, {
-        sessionPath,
-        timeoutMs: LIST_ALL_TIMEOUT_MS,
-        maxStdoutBytes: MAX_LIST_ALL_BYTES,
-      });
-      logEvent("suunto.workouts.list_all.suuntool", {
-        since,
-        exitCode: result.code,
-        stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
-        stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
-        stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
-        stdoutOverflowed: result.stdoutOverflowed || undefined,
-      });
-      if (result.stdoutOverflowed) {
-        // Checked before assertOk: the kill above surfaces as a signal exit, and a size error is far
-        // more actionable than the timeout it would otherwise be reported as.
-        const error = new Error("workout listing output is too large");
-        error.status = 413;
-        error.reason = "bad_request";
-        throw error;
-      }
 
-      const { workouts, malformedCount } = parseNdjsonWorkouts(result.stdout);
-      const failureReason = result.code !== 0 ? (EXIT_REASONS.get(result.code) ?? [502, "tool_error"])[1] : null;
-      // suuntool's own auto-pagination can still be interrupted mid-flight by a transient
-      // server/network hiccup even with a generous --timeout. If it had already streamed complete,
-      // parseable lines before dying, that's real data the caller already dedupes safely against --
-      // surface it as a (possibly partial) listing instead of discarding it, matching the "click
-      // again to continue" flow the caller already expects from a wall-time-budgeted fetch. Auth/
-      // usage failures (exit 4/2) never produce useful partial output and must still hard-fail.
-      const salvaged =
-        failureReason !== null &&
-        workouts.length > 0 &&
-        (failureReason === "server" || failureReason === "timeout" || failureReason === "network");
-      logEvent("suunto.workouts.list_all.result", {
-        since,
-        exitCode: result.code,
-        workoutCount: workouts.length,
-        malformedCount,
-        salvaged: salvaged || undefined,
-      });
-      if (result.code !== 0 && !salvaged) {
-        assertOk(result);
+      while (true) {
+        if (Date.now() > deadline) {
+          // The whole history wasn't reached within the budget -- return what's been paginated so
+          // far rather than erroring. The caller's own wall-time-budgeted staging loop already
+          // expects a listing to sometimes come back short and reports "click Fetch again"; the next
+          // click restarts pagination from offset 0, which is safe (not just fast) because every
+          // already-staged/saved workout is skipped by the caller's own dedupe check.
+          logEvent("suunto.workouts.list_all.result", { since, workoutCount: workouts.length, truncatedByDeadline: true });
+          return { workouts };
+        }
+        if (workouts.length > MAX_LIST_ALL_WORKOUTS) {
+          const error = new Error("workout listing has too many results");
+          error.status = 413;
+          error.reason = "bad_request";
+          throw error;
+        }
+
+        const args = ["workouts", "list", "--limit", String(LIST_ALL_PAGE_SIZE), "--offset", String(offset), "--format", "json"];
+        if (since) args.splice(2, 0, "--since", since);
+        const result = await runSuuntool(args, { sessionPath });
+        logEvent("suunto.workouts.list_all.page", {
+          since,
+          offset,
+          exitCode: result.code,
+          stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+          stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+          stderrPreview: result.stderr ? redact(result.stderr).slice(0, 500) : undefined,
+        });
+
+        if (result.code !== 0) {
+          const [, reason] = EXIT_REASONS.get(result.code) ?? [502, "tool_error"];
+          // A hiccup partway through paginating shouldn't discard pages already collected -- the
+          // caller already dedupes safely against whatever this returns. The very first page (offset
+          // 0, nothing collected yet) and any auth/usage failure still hard-fail via assertOk below.
+          const canSalvage = workouts.length > 0 && (reason === "server" || reason === "timeout" || reason === "network");
+          if (canSalvage) {
+            logEvent("suunto.workouts.list_all.result", { since, workoutCount: workouts.length, salvagedAtOffset: offset });
+            return { workouts };
+          }
+          assertOk(result);
+        }
+
+        const parsed = parseJson(result.stdout, []);
+        const page = extractWorkouts(parsed);
+        workouts.push(...page);
+        if (page.length < LIST_ALL_PAGE_SIZE) {
+          logEvent("suunto.workouts.list_all.result", { since, workoutCount: workouts.length });
+          return { workouts };
+        }
+        offset += LIST_ALL_PAGE_SIZE;
       }
-      if (malformedCount > 0 && workouts.length === 0) {
-        const error = new Error("workout listing produced no parseable output");
-        error.status = 500;
-        error.reason = "server";
-        throw error;
-      }
-      return { workouts };
     });
   }
 

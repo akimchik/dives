@@ -293,3 +293,34 @@ for *every* pnpm command (`lint`, `test`, all of them) — fixed by approving `e
 `pnpm-workspace.yaml`'s existing (pre-dating this repo) `allowBuilds` map, which is where pnpm 11
 actually reads that setting from (a `pnpm.onlyBuiltDependencies` key in `package.json`, the older
 convention, is silently ignored by this pnpm version).
+
+## 2026-09-07 02:16 CEST — Backfill Real dev-dives Data, Push, Surface Consumption Rate
+
+> so already imported SML dives will lack it?
+> will it be run on deployment?
+> run it yourself, get access using pumpking kuubectl
+> push it
+> watch the deploy status
+> Good, I also want a surface consumption rate be a separate data stream
+
+Confirmed already-imported Suunto profiles predate `gasConsumptionRate` and won't show the stream
+until backfilled, and that the deploy pipeline only auto-runs schema migrations, not this data
+backfill. Ran `scripts/backfill-suunto-gas-rate.ts` against the real `dev-dives` Postgres:
+`kubectl port-forward` couldn't target it (the `postgres` Service in the `data` namespace has no
+selector — it's a manually-wired `EndpointSlice` pointing at a bare host IP, not a pod), so instead
+compiled `lib/suunto/profile.ts` to plain JS with `tsc`, `kubectl cp`'d it plus the script into the
+live `dives` pod, and ran it there via `kubectl exec` using the pod's own `DATABASE_URL` and
+`node_modules` — no secrets left the cluster. Backfilled 5 real dives (ids 7, 9, 81, 84, 86; 0
+pending imports). Pushed `88ac90d`; both `ci.yml` and `deploy.yml` Gitea Actions runs succeeded and
+the new pod confirmed running the matching image tag.
+
+Then added the requested `surfaceConsumptionRate` stream: asked the user bar/min vs. L/min (true
+SAC rate, needs cylinder size) — they chose L/min. Extracted `ataAtDepth` (1 ATA/10m formula) out
+of `lib/gas-consumption.ts`'s existing per-dive SAC calculation into a shared helper, reused it in
+a new `computeSurfaceConsumptionRate` in `lib/suunto/profile.ts` (`gasConsumptionRate * tankSizeLitres
+/ ataAtDepth(depth)` per point, `null` across the board when tank size is unknown rather than
+silently mixing units), wired it into `SuuntoProfileChart` as a sixth stream, and generalized
+`formatWithUnit` to a per-series `decimals` field (the code-reviewer's earlier LOW suggestion from
+the gas-rate round) now that a third unit needed its own precision. Added unit tests proving the
+per-point depth-normalization (two points at the same 30 bar/min burn but different depths get
+different L/min values) and the tank-size-missing degradation, verified live in WebKit.

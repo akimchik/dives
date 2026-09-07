@@ -13,21 +13,34 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { SuuntoDiveProfilePoint } from "@/lib/suunto/profile";
 import { cn } from "@/lib/utils";
 
-type SeriesKey = "depth" | "temperature" | "tankPressure" | "gasConsumption" | "gasConsumptionRate";
+type SeriesKey =
+  | "depth"
+  | "temperature"
+  | "tankPressure"
+  | "gasConsumption"
+  | "gasConsumptionRate"
+  | "surfaceConsumptionRate";
 
-// Each stream has its own scale (metres vs °C vs bar), so multiple selected streams each get their
-// own (mostly hidden) y-axis rather than sharing one -- shadcn's Area Chart - Gradient
+// Units that read naturally glued to the number (8m, 19°C) rather than space-separated (184 bar).
+const NO_SPACE_UNITS = new Set(["m", "°C"]);
+
+// Each stream has its own scale (metres vs °C vs bar vs L/min), so multiple selected streams each
+// get their own (mostly hidden) y-axis rather than sharing one -- shadcn's Area Chart - Gradient
 // (https://ui.shadcn.com/charts/area#chart-area-gradient) plus a multi-select
 // https://ui.shadcn.com/docs/components/base/toggle -style switcher. Only one y-axis (the "depth"
 // stream if it's selected, otherwise whichever is first) is drawn, so picking several streams at
 // once doesn't clutter the chart with parallel axes -- the tooltip still reports every selected
 // stream's real value at the hovered time.
-const SERIES: { key: SeriesKey; label: string; unit: string; color: string }[] = [
-  { key: "depth", label: "Depth", unit: "m", color: "#0ea5e9" },
-  { key: "temperature", label: "Temp", unit: "°C", color: "#f97316" },
-  { key: "tankPressure", label: "Pressure", unit: "bar", color: "#10b981" },
-  { key: "gasConsumption", label: "Gas used", unit: "bar", color: "#8b5cf6" },
-  { key: "gasConsumptionRate", label: "Consumption rate", unit: "bar/min", color: "#ec4899" },
+const SERIES: { key: SeriesKey; label: string; unit: string; color: string; decimals: number }[] = [
+  { key: "depth", label: "Depth", unit: "m", color: "#0ea5e9", decimals: 0 },
+  { key: "temperature", label: "Temp", unit: "°C", color: "#f97316", decimals: 0 },
+  { key: "tankPressure", label: "Pressure", unit: "bar", color: "#10b981", decimals: 0 },
+  { key: "gasConsumption", label: "Gas used", unit: "bar", color: "#8b5cf6", decimals: 0 },
+  { key: "gasConsumptionRate", label: "Consumption rate", unit: "bar/min", color: "#ec4899", decimals: 1 },
+  // Surface (SAC) rate: gasConsumptionRate normalized for ambient pressure at depth, in L/min --
+  // see lib/suunto/profile.ts's computeSurfaceConsumptionRate for why raw bar/min isn't comparable
+  // across depths on its own.
+  { key: "surfaceConsumptionRate", label: "Surface rate", unit: "L/min", color: "#ef4444", decimals: 1 },
 ];
 
 const chartConfig = Object.fromEntries(
@@ -41,10 +54,9 @@ function hasValues(points: SuuntoDiveProfilePoint[], key: SeriesKey): boolean {
   });
 }
 
-function formatWithUnit(value: number, unit: string): string {
-  if (unit === "bar/min") return `${value.toFixed(1)} ${unit}`;
-  const rounded = Math.round(value);
-  return unit === "bar" ? `${rounded} bar` : `${rounded}${unit}`;
+function formatWithUnit(value: number, unit: string, decimals: number): string {
+  const formatted = value.toFixed(decimals);
+  return NO_SPACE_UNITS.has(unit) ? `${formatted}${unit}` : `${formatted} ${unit}`;
 }
 
 // Takes just the points, not the whole SuuntoDiveProfile: this is a client component, and Next.js
@@ -154,7 +166,7 @@ export function SuuntoProfileChart({
               tickMargin={8}
               width={series.key === primary.key ? 56 : 0}
               domain={series.key === "depth" ? [0, "dataMax"] : ["auto", "auto"]}
-              tickFormatter={(value: number) => formatWithUnit(value, series.unit)}
+              tickFormatter={(value: number) => formatWithUnit(value, series.unit, series.decimals)}
             />
           ))}
           <ChartTooltip

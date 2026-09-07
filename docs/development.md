@@ -152,17 +152,22 @@ derived `depth_profile` JSON, so a future parser change can re-derive it.
 are client components built on shadcn's `chart.tsx` (recharts) — shadcn's Area
 Chart - Gradient, with tooltips. The depth y-axis uses recharts' `reversed`, so
 depth still grows downward and the trace reads like a dive computer's.
-`SuuntoProfileChart`'s five
-streams (depth/temperature/tankPressure/gasConsumption/gasConsumptionRate)
+`SuuntoProfileChart`'s six streams
+(depth/temperature/tankPressure/gasConsumption/gasConsumptionRate/surfaceConsumptionRate)
 don't share a scale, so only the primary selected stream draws a (visible)
 y-axis; a multi-select `ToggleGroup` lets several streams be overlaid at once,
 with the tooltip reporting every selected stream's real value at the hovered
 time. `gasConsumptionRate` is `lib/suunto/profile.ts`'s `rate(gas_used[1m])`
 — the average bar/min drop in tank pressure over the trailing 1-minute window
 ending at each point, computed with a two-pointer walk since points are
-already time-ordered. The component takes just `points`, not the whole
-`SuuntoDiveProfile`, so the raw Suunto summary blob (see below) never crosses
-the server→client boundary.
+already time-ordered. `surfaceConsumptionRate` is that same rate normalized
+to a Surface Air Consumption (SAC) rate in L/min via `lib/gas-consumption.ts`'s
+shared `ataAtDepth` helper — raw bar/min reads faster at depth purely because
+compressed gas is denser there, so it isn't comparable point-to-point without
+this normalization; the whole stream is `null` when a dive's tank size wasn't
+captured, since bar/min can't be converted to L/min without it. The component
+takes just `points`, not the whole `SuuntoDiveProfile`, so the raw Suunto
+summary blob (see below) never crosses the server→client boundary.
 
 ### Theme
 

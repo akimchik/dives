@@ -1,5 +1,6 @@
 import type { DepthPoint } from "@/lib/depth-profile";
 import type { DiveInput } from "@/lib/dives";
+import { ataAtDepth } from "@/lib/gas-consumption";
 
 export type SuuntoDiveProfilePoint = {
   time: number;
@@ -9,6 +10,7 @@ export type SuuntoDiveProfilePoint = {
   tankPressure: number | null;
   gasConsumption: number | null;
   gasConsumptionRate: number | null;
+  surfaceConsumptionRate: number | null;
 };
 
 export type SuuntoDiveProfile = {
@@ -115,6 +117,25 @@ function computeGasConsumptionRate(
     if (start === 0 && elapsedMinutes < windowMinutes) return null;
 
     return round((point.gasConsumption - windowStart.gasConsumption) / elapsedMinutes, 2);
+  });
+}
+
+// Surface (SAC) rate: gasConsumptionRate is tank-pressure drop, which reads faster at depth purely
+// because compressed gas is denser there, not because the diver is breathing any harder -- the same
+// effort at 30m drains a tank ~4x faster than at the surface. Normalizing by ataAtDepth (same
+// formula lib/gas-consumption.ts uses for the whole-dive average) removes that depth artifact so
+// this stream is actually comparable point-to-point and across dives. Needs tankSizeLitres, which
+// isn't always present in a Suunto export, so the whole stream is null when it's missing rather
+// than silently mixing bar/min and L/min.
+function computeSurfaceConsumptionRate(
+  points: Pick<SuuntoDiveProfilePoint, "depth" | "gasConsumptionRate">[],
+  tankSizeLitres: number | null,
+): (number | null)[] {
+  if (tankSizeLitres === null) return points.map(() => null);
+
+  return points.map((point) => {
+    if (point.depth === null || point.gasConsumptionRate === null) return null;
+    return round((point.gasConsumptionRate * tankSizeLitres) / ataAtDepth(point.depth), 2);
   });
 }
 
@@ -305,13 +326,14 @@ export function compileSuuntoDiveProfile(
   const tankSizeLitres = firstNumber(headerGas.TankSize);
   const tankSize = tankSizeLitres === null ? null : round(tankSizeLitres * (tankSizeLitres < 1 ? 1000 : 1), 1);
 
-  // gasConsumptionRate is deliberately absent here: unlike its siblings it isn't a last-known-value
-  // carried forward sample-to-sample, but a windowed derivative computed in one pass over the whole
-  // series below, so keeping it out of this type prevents a future edit from wiring in a stale
-  // carry-forward for it by copying the `x ?? previous.x` pattern.
-  const preRatePoints: Omit<SuuntoDiveProfilePoint, "gasConsumptionRate">[] = [];
+  // gasConsumptionRate and surfaceConsumptionRate are deliberately absent here: unlike their
+  // siblings they aren't last-known-values carried forward sample-to-sample, but derivatives
+  // computed in one pass over the whole series below, so keeping them out of this type prevents a
+  // future edit from wiring in a stale carry-forward for either by copying the `x ?? previous.x`
+  // pattern.
+  const preRatePoints: Omit<SuuntoDiveProfilePoint, "gasConsumptionRate" | "surfaceConsumptionRate">[] = [];
   let firstTimestampMs: number | null = null;
-  let previous: Omit<SuuntoDiveProfilePoint, "time" | "timestamp" | "gasConsumptionRate"> = {
+  let previous: Omit<SuuntoDiveProfilePoint, "time" | "timestamp" | "gasConsumptionRate" | "surfaceConsumptionRate"> = {
     depth: null,
     temperature: null,
     tankPressure: null,
@@ -344,9 +366,14 @@ export function compileSuuntoDiveProfile(
   }
 
   const gasConsumptionRates = computeGasConsumptionRate(preRatePoints);
-  const rawPoints: SuuntoDiveProfilePoint[] = preRatePoints.map((point, index) => ({
+  const pointsWithRate = preRatePoints.map((point, index) => ({
     ...point,
     gasConsumptionRate: gasConsumptionRates[index],
+  }));
+  const surfaceConsumptionRates = computeSurfaceConsumptionRate(pointsWithRate, tankSize);
+  const rawPoints: SuuntoDiveProfilePoint[] = pointsWithRate.map((point, index) => ({
+    ...point,
+    surfaceConsumptionRate: surfaceConsumptionRates[index],
   }));
 
   const depthProfile = rawPoints

@@ -84,6 +84,7 @@ describe("compileSuuntoDiveProfile", () => {
     expect(result.profile.tankSizeLitres).toBe(14);
     expect(result.profile.gasMix).toBe("Air");
     expect(result.profile.points.map((point) => point.gasConsumptionRate)).toEqual([null, 14.6, 75.9]);
+    expect(result.profile.points.map((point) => point.surfaceConsumptionRate)).toEqual([null, 108.61, 703.71]);
     expect(result.profile.points.at(-1)).toMatchObject({ depth: 5.1, tankPressure: 94.1, gasConsumption: 90.5 });
     expect(result.profile.depthProfile).toEqual([
       { time: 0, depth: 1.42 },
@@ -278,5 +279,53 @@ describe("compileSuuntoDiveProfile", () => {
       30, // t=60s: first full 1-minute window, correctly averages to the true 30 bar/min rate
       null, // t=150s: nearest prior sample is 90s back, outside the 1-minute window -- no rate
     ]);
+    // This fixture's DiveHeader has no TankSize, so surfaceConsumptionRate can't be converted to
+    // L/min -- it must degrade to null across the board rather than silently mixing units with a
+    // missing conversion factor, even at t=60s where gasConsumptionRate itself is a real 30.
+    expect(result.profile.points.every((point) => point.surfaceConsumptionRate === null)).toBe(true);
+  });
+
+  it("normalizes the surface consumption rate by depth so it isn't just a rescaled gasConsumptionRate", () => {
+    // Same 30 bar/min burn as the dense-window fixture above, but now with a TankSize so
+    // surfaceConsumptionRate (SAC, L/min) can be computed, and two different depths at the two
+    // points that actually get a gasConsumptionRate -- proving the depth-normalization (ataAtDepth)
+    // is really applied per-point rather than using one fixed depth for the whole dive.
+    const pressureSample = (secondsOffset: number, bar: number, depth: number) => ({
+      TimeISO8601: new Date(Date.parse("2026-08-30T10:40:08.250+02:00") + secondsOffset * 1000).toISOString(),
+      Attributes: {
+        "suunto/sml": { Sample: { Depth: depth, Cylinders: [{ Pressure: bar * 100000 }] } },
+      },
+    });
+
+    const result = compileSuuntoDiveProfile("surface-rate", {
+      Data: {
+        Samples: [
+          pressureSample(0, 250, 20),
+          pressureSample(60, 220, 20), // ata(20m) = 3
+          pressureSample(120, 190, 40), // ata(40m) = 5
+        ],
+      },
+      Summary: {
+        Samples: [
+          {
+            Attributes: {
+              "suunto/sml": {
+                DiveHeader: { Gases: [{ TankFillPressure: 25000000, TankSize: 0.012 }] },
+                DiveFooter: { Gases: [{ StartPressure: 25000000, EndPressure: 19000000 }] },
+                Windows: [{ Type: "Dive", DiveTime: 120, Depth: [{ Max: 40, Avg: 30 }] }],
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.profile.tankSizeLitres).toBe(12);
+    // Both points burn gas at the same 30 bar/min, so with a fixed depth the two surface rates
+    // would be identical -- they aren't, because ata(20m)=3 and ata(40m)=5 pull them apart.
+    expect(result.profile.points.map((point) => point.gasConsumptionRate)).toEqual([null, 30, 30]);
+    expect(result.profile.points.map((point) => point.surfaceConsumptionRate)).toEqual([null, 120, 72]);
   });
 });

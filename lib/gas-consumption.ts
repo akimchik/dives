@@ -14,6 +14,11 @@ export type GasConsumptionResult = {
   sacRateLitersPerMin: number;
 };
 
+/** Ambient pressure in atmospheres absolute at a given depth in metres of seawater. */
+export function ataAtDepth(depthMetres: number): number {
+  return depthMetres / 10 + 1;
+}
+
 /** Returns null whenever any required input is missing or the numbers can't produce a real rate. */
 export function computeGasConsumption(input: GasConsumptionInput): GasConsumptionResult | null {
   const { startPressure, endPressure, cylinderSize, avgDepth, bottomTimeMinutes } = input;
@@ -33,8 +38,7 @@ export function computeGasConsumption(input: GasConsumptionInput): GasConsumptio
   }
 
   const gasUsedLiters = (startPressure - endPressure) * cylinderSize;
-  const ata = avgDepth / 10 + 1;
-  const sacRateLitersPerMin = gasUsedLiters / bottomTimeMinutes / ata;
+  const sacRateLitersPerMin = gasUsedLiters / bottomTimeMinutes / ataAtDepth(avgDepth);
 
   return { gasUsedLiters, sacRateLitersPerMin };
 }

@@ -135,23 +135,30 @@ groups of radar-chart datasets, one per collapsible section
 **Seasonality** — angle axis = calendar month, aggregated across every year
 the user has logged (a January dive from 2023 and one from 2026 land in the
 same bucket — this is a seasonality view, not a timeline). Per issue #7:
-dives/month and depth/duration averages are single-series radars, scaled
-`0..max+10%` headroom (duration uses the issue's explicit `5min..max+15min`
-instead); visibility and SAC rate (computed per dive via
+dives/month is a single-series radar scaled `0..max+10%` headroom; duration
+uses the issue's explicit `5min..max+15min` domain instead; depth is
+normalised to exactly the observed max (`exactMax`, a follow-up correction —
+its outer ring reads as "the deepest dive", not as a scale with spare room,
+unlike every other chart here); visibility and SAC rate (computed per dive via
 `lib/gas-consumption.ts`'s `computeGasConsumption`) are three-series
 min/max/avg radars per a follow-up correction; water temp is a two-series
 avg-high/avg-low radar.
 
 **Distributions** — angle axis = a value range or a value itself, radius = how
 many dives fall in it (a follow-up correction replaced the original single
-"Conditions & company" radar with this group). `numericDistribution` buckets
-depth/duration/visibility/SAC rate into fixed-size steps (5m/10min/5m/5 L per
-min), one bucket per step up to whichever bucket the largest observed value
-falls into, labelled by each bucket's lower bound.
-`intensityDistribution` counts dives per exact value for current/surge/waves
-(dive-form.tsx's `INTENSITY_ORDER`: None/Mild/Moderate/Strong) — a dive that
-never recorded the field is excluded rather than folded into "None", since
-"not recorded" and "recorded as none" are different facts.
+normalised-percentage "Conditions & company" radar with this group).
+`numericDistribution` buckets depth/duration/visibility/SAC rate into
+fixed-size steps — depth is the issue's own 5m example; duration/visibility/
+SAC rate were tightened by a second follow-up correction to 5min/2.5m/(5/3)
+L-per-min (2x/2x/3x finer than their original 10min/5m/5 L-per-min steps) —
+one bucket per step up to whichever bucket the largest observed value falls
+into, labelled by each bucket's lower bound (`formatBucketLabel` rounds to
+hundredths and trims trailing zeros, since a fractional step like 5/3
+otherwise produces floating-point tails in the label). `current`, `surge` and
+`waves` (dive-form.tsx's `INTENSITY_ORDER`: None/Mild/Moderate/Strong) share
+one radar as three series — a dive that never recorded a given field is
+excluded from that field's series rather than folded into "None", since "not
+recorded" and "recorded as none" are different facts.
 
 Categories with no matching dives pull to the chart's center rather than
 leaving a gap — Recharts' polar angle axis is a fixed set of categories, not a

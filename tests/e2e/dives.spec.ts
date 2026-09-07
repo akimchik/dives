@@ -333,7 +333,7 @@ test.describe("dive logbook", () => {
     // "Distributions" is a separate collapsible section, open by default alongside "Seasonality".
     await expect(page.getByRole("button", { name: "Distributions" })).toBeVisible();
     await expect(page.getByTestId("radar-distribution-depth")).toBeVisible();
-    await expect(page.getByTestId("radar-distribution-current")).toBeVisible();
+    await expect(page.getByTestId("radar-distribution-conditions")).toBeVisible();
 
     // Collapsing "Distributions" hides its charts without touching "Seasonality".
     await page.getByRole("button", { name: "Distributions" }).click();

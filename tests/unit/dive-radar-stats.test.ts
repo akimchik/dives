@@ -100,7 +100,15 @@ describe("buildDiveRadarStats — seasonality", () => {
 
     const jan = stats.seasonality.depthPerMonth.data.find((point) => point.month === "Jan")!;
     expect(jan.value).toBeCloseTo(25, 5);
-    expect(stats.seasonality.depthPerMonth.domain).toEqual([0, 30 * 1.1]);
+  });
+
+  it("normalises the depth-by-month domain to exactly the observed max, unlike every other chart", () => {
+    const stats = buildDiveRadarStats([makeDive({ max_depth: "18" }), makeDive({ max_depth: "30" })]);
+    expect(stats.seasonality.depthPerMonth.domain).toEqual([0, 30]);
+  });
+
+  it("falls back to a [0, 1] depth domain when there are no dives", () => {
+    expect(buildDiveRadarStats([]).seasonality.depthPerMonth.domain).toEqual([0, 1]);
   });
 
   it("scales duration as 5 minutes .. longest dive + 15 minutes, per issue #7", () => {
@@ -197,10 +205,17 @@ describe("buildDiveRadarStats — distributions", () => {
     expect(Math.max(...stats.distributions.depth.data.map((p) => Number(p.bucket)))).toBe(30);
   });
 
-  it("buckets duration into 10-minute steps", () => {
+  it("buckets duration into 5-minute steps (2x finer than the original 10min step)", () => {
     const stats = buildDiveRadarStats([makeDive({ bottom_time_minutes: 25 }), makeDive({ bottom_time_minutes: 27 })]);
     const byBucket = Object.fromEntries(stats.distributions.duration.data.map((p) => [p.bucket, p.count]));
-    expect(byBucket["20"]).toBe(2);
+    expect(byBucket["25"]).toBe(2);
+  });
+
+  it("buckets visibility into 2.5m steps (2x finer than the original 5m step)", () => {
+    const stats = buildDiveRadarStats([makeDive({ visibility: "6" }), makeDive({ visibility: "7" })]);
+    const byBucket = Object.fromEntries(stats.distributions.visibility.data.map((p) => [p.bucket, p.count]));
+    // Both fall in [5, 7.5) -> the bucket labelled "5".
+    expect(byBucket["5"]).toBe(2);
   });
 
   it("returns a single zeroed bucket when no dives have the property recorded", () => {
@@ -209,7 +224,7 @@ describe("buildDiveRadarStats — distributions", () => {
     expect(stats.distributions.depth.domain).toEqual([0, 1]);
   });
 
-  it("counts SAC rate distribution from the same per-dive computation as the monthly series", () => {
+  it("counts SAC rate distribution in 5/3 L/min steps (3x finer than the original 5 L/min step)", () => {
     const stats = buildDiveRadarStats([
       makeDive({
         start_pressure: "200",
@@ -220,35 +235,50 @@ describe("buildDiveRadarStats — distributions", () => {
       }),
     ]);
 
-    // 16.0714 L/min falls in the 15-20 bucket, labelled "15".
+    // 16.0714 L/min / (5/3) = 9.64 -> bucket index 9 -> label 9 * 5/3 = 15.
     const byBucket = Object.fromEntries(stats.distributions.sacRate.data.map((p) => [p.bucket, p.count]));
     expect(byBucket["15"]).toBe(1);
   });
 
-  it("counts dives per exact intensity value for current/surge/waves", () => {
+  it("formats fractional bucket labels as clean decimals, not floating-point tails", () => {
+    const stats = buildDiveRadarStats([
+      makeDive({
+        start_pressure: "200",
+        end_pressure: "40",
+        cylinder_size: "12",
+        avg_depth: "10",
+        bottom_time_minutes: 30,
+      }),
+    ]);
+
+    // index * (5/3) produces tails like 3.3333333333333335 without formatBucketLabel's rounding.
+    for (const point of stats.distributions.sacRate.data) {
+      expect(point.bucket).toMatch(/^\d+(\.\d{1,2})?$/);
+    }
+  });
+
+  it("plots current/surge/waves as three series on one intensity-level radar", () => {
     const stats = buildDiveRadarStats([
       makeDive({ current: "Strong", surge: "None", waves: "Mild" }),
       makeDive({ current: "Strong", surge: "Moderate", waves: null }),
     ]);
 
-    const currentByLevel = Object.fromEntries(stats.distributions.current.data.map((p) => [p.level, p.count]));
-    expect(currentByLevel["Strong"]).toBe(2);
-    expect(currentByLevel["None"]).toBe(0);
-
-    const surgeByLevel = Object.fromEntries(stats.distributions.surge.data.map((p) => [p.level, p.count]));
-    expect(surgeByLevel["None"]).toBe(1);
-    expect(surgeByLevel["Moderate"]).toBe(1);
-
+    const byLevel = Object.fromEntries(stats.distributions.conditions.data.map((p) => [p.level, p]));
+    expect(byLevel["Strong"].current).toBe(2);
+    expect(byLevel["None"].current).toBe(0);
+    expect(byLevel["None"].surge).toBe(1);
+    expect(byLevel["Moderate"].surge).toBe(1);
     // The dive with waves: null is excluded entirely, not folded into "None".
-    const wavesByLevel = Object.fromEntries(stats.distributions.waves.data.map((p) => [p.level, p.count]));
-    expect(wavesByLevel["Mild"]).toBe(1);
-    expect(wavesByLevel["None"]).toBe(0);
+    expect(byLevel["Mild"].waves).toBe(1);
+    expect(byLevel["None"].waves).toBe(0);
   });
 
   it("always reports all four intensity levels even when none were recorded", () => {
     const stats = buildDiveRadarStats([makeDive({})]);
-    expect(stats.distributions.waves.data.map((p) => p.level)).toEqual(["None", "Mild", "Moderate", "Strong"]);
-    expect(stats.distributions.waves.data.every((p) => p.count === 0)).toBe(true);
-    expect(stats.distributions.waves.domain).toEqual([0, 1]);
+    expect(stats.distributions.conditions.data.map((p) => p.level)).toEqual(["None", "Mild", "Moderate", "Strong"]);
+    expect(stats.distributions.conditions.data.every((p) => p.current === 0 && p.surge === 0 && p.waves === 0)).toBe(
+      true,
+    );
+    expect(stats.distributions.conditions.domain).toEqual([0, 1]);
   });
 });

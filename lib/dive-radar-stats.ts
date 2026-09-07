@@ -5,10 +5,20 @@
 //   January dive from 2023 and one from 2026 land in the same bucket -- this is a seasonality view,
 //   not a timeline).
 // - "distributions": angle axis = a value range (numeric properties bucketed into fixed-size steps)
-//   or a value itself (the three ordinal intensity fields), radius = how many dives fall in it.
+//   or a value itself (current/surge/waves, plotted as three series on one intensity-level radar),
+//   radius = how many dives fall in it.
 
+import { trimNumeric } from "@/lib/dive-format";
 import type { DiveRecord } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
+
+// Distribution bucket sizes. Depth is the issue's own example; duration/visibility/SAC rate were
+// tightened by a follow-up correction (2x/2x/3x finer than their original 10min/5m/5 L-per-min
+// steps) to show more structure in the histogram shape.
+const DEPTH_BUCKET_STEP = 5;
+const DURATION_BUCKET_STEP = 5;
+const VISIBILITY_BUCKET_STEP = 2.5;
+const SAC_RATE_BUCKET_STEP = 5 / 3;
 
 const MONTH_LABELS = [
   "Jan",
@@ -33,12 +43,12 @@ type MonthlyRadarPoint = { month: string; value: number | null };
 type MonthlyMinMaxAvgPoint = { month: string; min: number | null; max: number | null; avg: number | null };
 type WaterTempRadarPoint = { month: string; high: number | null; low: number | null };
 type BucketPoint = { bucket: string; count: number };
-type IntensityPoint = { level: string; count: number };
+type IntensityMultiPoint = { level: string; current: number; surge: number; waves: number };
 
 type MonthlyRadarSeries = { data: MonthlyRadarPoint[]; domain: [number, number] };
 type MonthlyMinMaxAvgSeries = { data: MonthlyMinMaxAvgPoint[]; domain: [number, number] };
 type BucketSeries = { data: BucketPoint[]; domain: [number, number] };
-type IntensitySeries = { data: IntensityPoint[]; domain: [number, number] };
+type IntensityMultiSeries = { data: IntensityMultiPoint[]; domain: [number, number] };
 
 export type DiveRadarStats = {
   seasonality: {
@@ -54,9 +64,7 @@ export type DiveRadarStats = {
     duration: BucketSeries;
     visibility: BucketSeries;
     sacRate: BucketSeries;
-    waves: IntensitySeries;
-    surge: IntensitySeries;
-    current: IntensitySeries;
+    conditions: IntensityMultiSeries;
   };
 };
 
@@ -77,6 +85,20 @@ function average(values: number[]): number | null {
 // "0..{max+10%}" spec for depth/SAC rate, extended to every other magnitude chart for the same reason.
 function withHeadroom(max: number): [number, number] {
   return [0, max > 0 ? max * 1.1 : 1];
+}
+
+// "Depth by month" is normalised to exactly the observed max instead (a follow-up correction) --
+// unlike withHeadroom's charts, its outer ring is meant to read as "the deepest dive", not as a
+// scale with spare room.
+function exactMax(max: number): [number, number] {
+  return [0, max > 0 ? max : 1];
+}
+
+// Bucket lower bounds can fall on long floating-point tails once a step is a fraction (e.g. SAC
+// rate's 5/3 L/min), so round to hundredths and trim trailing zeros the same way every other
+// measurement on this dashboard is displayed (lib/dive-format.ts).
+function formatBucketLabel(value: number): string {
+  return trimNumeric(Math.round(value * 100) / 100) ?? "0";
 }
 
 function groupByMonth(dives: DiveRecord[]): DiveRecord[][] {
@@ -142,7 +164,7 @@ function numericDistribution(dives: DiveRecord[], extract: (dive: DiveRecord) =>
   const values = dives.map(extract).filter((value): value is number => value !== null && value >= 0);
 
   if (values.length === 0) {
-    return { data: [{ bucket: "0", count: 0 }], domain: withHeadroom(0) };
+    return { data: [{ bucket: formatBucketLabel(0), count: 0 }], domain: withHeadroom(0) };
   }
 
   const bucketCount = Math.floor(Math.max(...values) / step) + 1;
@@ -152,21 +174,17 @@ function numericDistribution(dives: DiveRecord[], extract: (dive: DiveRecord) =>
   }
 
   return {
-    data: counts.map((count, index) => ({ bucket: String(index * step), count })),
+    data: counts.map((count, index) => ({ bucket: formatBucketLabel(index * step), count })),
     domain: withHeadroom(Math.max(...counts)),
   };
 }
 
-// One bucket per ordinal level (None/Mild/Moderate/Strong), radius = how many dives recorded that
-// exact value. Dives that never recorded the field are excluded rather than folded into "None" --
-// "not recorded" and "recorded as none" are different facts.
-function intensityDistribution(dives: DiveRecord[], extract: (dive: DiveRecord) => string | null): IntensitySeries {
-  const counts = INTENSITY_ORDER.map((level) => ({
-    level,
-    count: dives.filter((dive) => extract(dive) === level).length,
-  }));
-
-  return { data: counts, domain: withHeadroom(Math.max(...counts.map((point) => point.count))) };
+// One bucket per ordinal level (None/Mild/Moderate/Strong) per field, all three plotted as series on
+// the same radar so current/surge/waves can be compared directly. Radius = how many dives recorded
+// that exact value; a dive that never recorded a field is excluded from that field's series rather
+// than folded into "None" -- "not recorded" and "recorded as none" are different facts.
+function intensityCounts(dives: DiveRecord[], extract: (dive: DiveRecord) => string | null): number[] {
+  return INTENSITY_ORDER.map((level) => dives.filter((dive) => extract(dive) === level).length);
 }
 
 export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
@@ -192,10 +210,22 @@ export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
   }));
   const waterTempMax = Math.max(0, ...waterTempHigh.values, ...waterTempLow.values);
 
+  const currentCounts = intensityCounts(dives, (dive) => dive.current);
+  const surgeCounts = intensityCounts(dives, (dive) => dive.surge);
+  const wavesCounts = intensityCounts(dives, (dive) => dive.waves);
+  const conditionsData: IntensityMultiPoint[] = INTENSITY_ORDER.map((level, index) => ({
+    level,
+    current: currentCounts[index],
+    surge: surgeCounts[index],
+    waves: wavesCounts[index],
+  }));
+
   return {
     seasonality: {
       divesPerMonth: { data: divesPerMonth, domain: withHeadroom(divesPerMonthMax) },
-      depthPerMonth: { data: depth.data, domain: withHeadroom(Math.max(0, ...depth.values)) },
+      // Normalised to exactly the observed max (a follow-up correction), not +10% headroom like
+      // every other magnitude chart here.
+      depthPerMonth: { data: depth.data, domain: exactMax(Math.max(0, ...depth.values)) },
       // Issue #7's explicit duration scale: 5 minutes .. longest dive + 15 minutes.
       durationPerMonth: {
         data: duration.data,
@@ -206,13 +236,14 @@ export function buildDiveRadarStats(dives: DiveRecord[]): DiveRadarStats {
       sacRatePerMonth: { data: sacRate.data, domain: withHeadroom(Math.max(0, ...sacRate.values)) },
     },
     distributions: {
-      depth: numericDistribution(dives, (dive) => toNumber(dive.max_depth), 5),
-      duration: numericDistribution(dives, (dive) => dive.bottom_time_minutes, 10),
-      visibility: numericDistribution(dives, (dive) => toNumber(dive.visibility), 5),
-      sacRate: numericDistribution(dives, diveSacRate, 5),
-      waves: intensityDistribution(dives, (dive) => dive.waves),
-      surge: intensityDistribution(dives, (dive) => dive.surge),
-      current: intensityDistribution(dives, (dive) => dive.current),
+      depth: numericDistribution(dives, (dive) => toNumber(dive.max_depth), DEPTH_BUCKET_STEP),
+      duration: numericDistribution(dives, (dive) => dive.bottom_time_minutes, DURATION_BUCKET_STEP),
+      visibility: numericDistribution(dives, (dive) => toNumber(dive.visibility), VISIBILITY_BUCKET_STEP),
+      sacRate: numericDistribution(dives, diveSacRate, SAC_RATE_BUCKET_STEP),
+      conditions: {
+        data: conditionsData,
+        domain: withHeadroom(Math.max(...currentCounts, ...surgeCounts, ...wavesCounts)),
+      },
     },
   };
 }

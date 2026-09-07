@@ -545,3 +545,33 @@ clipping them against the card edge ("Strong" rendered as "rong"). Fixed with
 `tests/e2e/dives.spec.ts`'s radar test to check both collapsible sections
 independently (collapsing one leaves the other's charts visible). Full suite
 green: typecheck, lint, `knip`, unit (131/131), full WebKit e2e (23/23).
+
+## 2026-09-07 — Radar chart corrections, round 2
+
+> Dives by SAC rate: increase range discreteness 3x; Dives by visibility -- 2x; by duration -- 2x. Combine Dives by current,surge, waves into one multi series radar. Depth by month: normalize max value of the axis to max available value.
+
+Tightened three distribution bucket sizes: SAC rate 5 → 5/3 L/min (3x), duration
+10 → 5min (2x), visibility 5 → 2.5m (2x) — depth's 5m step (the issue's own
+example) is unchanged. A fractional step like 5/3 produces long floating-point
+bucket-label tails (`3.3333333333333335`), so added `formatBucketLabel`
+(round to hundredths, trim trailing zeros via the existing `trimNumeric` from
+`lib/dive-format.ts`).
+
+Merged the three separate current/surge/waves distribution cards from the
+previous round into one radar (`distributions.conditions`, three series on a
+shared None/Mild/Moderate/Strong angle axis) — same "exclude unset, don't fold
+into None" rule as before, just plotted together instead of as three cards.
+
+"Depth by month" now normalises its radius domain to exactly the observed max
+(`exactMax`) instead of the `+10%` headroom every other chart on this
+dashboard uses — its outer ring is meant to read as "the deepest dive", not as
+a scale with room to spare.
+
+Verified with a third seeded-data screenshot pass (not committed) that the new
+bucket ticks render as clean numbers (0, 1.67, 3.33, 5, ...) and the merged
+conditions radar shows all three series with a legend. Updated
+`tests/unit/dive-radar-stats.test.ts` (19 cases) and
+`tests/e2e/dives.spec.ts`'s testid for the merged chart. Full suite green:
+typecheck, lint, `knip`, unit (135/135), full WebKit e2e (23/23, one
+known-flaky navigation-race test in the suite re-confirmed passing in
+isolation, unrelated to this change).

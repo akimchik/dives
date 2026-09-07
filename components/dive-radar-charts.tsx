@@ -228,34 +228,18 @@ export function DiveRadarCharts({ stats }: { stats: DiveRadarStats }) {
           seriesKeys={["count"]}
         />
         <RadarStatCard
-          title="Dives by current"
-          ariaLabel="Number of dives per recorded current intensity"
-          testId="radar-distribution-current"
-          config={{ count: { label: "Dives", theme: AVG } }}
-          data={stats.distributions.current.data}
-          domain={stats.distributions.current.domain}
+          title="Dives by current, surge & waves"
+          ariaLabel="Number of dives per recorded intensity, for current, surge and waves"
+          testId="radar-distribution-conditions"
+          config={{
+            current: { label: "Current", theme: AVG },
+            surge: { label: "Surge", theme: HIGH },
+            waves: { label: "Waves", theme: LOW },
+          }}
+          data={stats.distributions.conditions.data}
+          domain={stats.distributions.conditions.domain}
           angleKey="level"
-          seriesKeys={["count"]}
-        />
-        <RadarStatCard
-          title="Dives by surge"
-          ariaLabel="Number of dives per recorded surge intensity"
-          testId="radar-distribution-surge"
-          config={{ count: { label: "Dives", theme: AVG } }}
-          data={stats.distributions.surge.data}
-          domain={stats.distributions.surge.domain}
-          angleKey="level"
-          seriesKeys={["count"]}
-        />
-        <RadarStatCard
-          title="Dives by waves"
-          ariaLabel="Number of dives per recorded wave intensity"
-          testId="radar-distribution-waves"
-          config={{ count: { label: "Dives", theme: AVG } }}
-          data={stats.distributions.waves.data}
-          domain={stats.distributions.waves.domain}
-          angleKey="level"
-          seriesKeys={["count"]}
+          seriesKeys={["current", "surge", "waves"]}
         />
       </RadarSection>
     </div>

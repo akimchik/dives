@@ -81,3 +81,88 @@ export async function seedSuuntoDive(email: string, sml: unknown): Promise<{ div
 
   return { diveId: result.rows[0].id, workoutKey };
 }
+
+/**
+ * Inserts a plain dive row directly (same rationale as seedSuuntoDive: driving dive creation
+ * through the UI form races router.refresh()/router.push()'s client-side transition, which is
+ * fine for specs that only create one dive but flaky for specs that immediately navigate
+ * elsewhere afterwards).
+ */
+export async function seedDive(
+  email: string,
+  fields: { title?: string | null; occurredAt: string; maxDepth?: number | null; notes?: string | null },
+): Promise<{ diveId: number }> {
+  const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
+  if (user.rows.length === 0) throw new Error(`no user found for email ${email}`);
+
+  const result = await pool.query<{ id: number }>(
+    `insert into dives (user_id, title, occurred_at, max_depth, notes)
+     values ($1, $2, $3, $4, $5)
+     returning id`,
+    [user.rows[0].id, fields.title ?? null, fields.occurredAt, fields.maxDepth ?? null, fields.notes ?? null],
+  );
+
+  return { diveId: result.rows[0].id };
+}
+
+// Deliberately duck-typed instead of importing Partial<DiveInput> from lib/dives.ts: that module
+// (like most of lib/) starts with `import "server-only"`, unsafe to load in this plain Node
+// process even as a type-only import (see the header comment on session-token.ts above).
+type DraftDiveFields = {
+  title?: string | null;
+  occurredAt?: string;
+  maxDepth?: number | null;
+  buddy?: string | null;
+  notes?: string | null;
+};
+
+/**
+ * Inserts a staged suunto_imports row directly (see seedSuuntoDive's comment on why the real
+ * OAuth-backed fetch/merge flow can't be driven from e2e), so merge-review specs can open
+ * `/settings/integrations/suunto/imports/[id]` without a live Suunto connection.
+ */
+export async function seedSuuntoImport(
+  email: string,
+  draftDive: DraftDiveFields,
+): Promise<{ importId: number; workoutKey: string }> {
+  const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
+  if (user.rows.length === 0) throw new Error(`no user found for email ${email}`);
+
+  const workoutKey = `e2e-merge-${randomBytes(6).toString("hex")}`;
+  const compiledProfile = {
+    source: "suunto",
+    version: 1,
+    workoutKey,
+    startedAt: draftDive.occurredAt ?? null,
+    durationMinutes: null,
+    maxDepth: draftDive.maxDepth ?? null,
+    averageDepth: null,
+    waterTemperature: null,
+    waterTemperatureLow: null,
+    tankStartPressure: null,
+    tankEndPressure: null,
+    tankSizeLitres: null,
+    gasMix: null,
+    location: null,
+    points: [],
+    depthProfile: [],
+    summary: {},
+  };
+
+  const result = await pool.query<{ id: number }>(
+    `insert into suunto_imports
+       (user_id, workout_key, workout_started_at, summary, draft_dive, compiled_profile, original_bundle, updated_at)
+     values ($1, $2, $3, '{}'::jsonb, $4::jsonb, $5::jsonb, $6, now())
+     returning id`,
+    [
+      user.rows[0].id,
+      workoutKey,
+      draftDive.occurredAt ?? null,
+      JSON.stringify(draftDive),
+      JSON.stringify(compiledProfile),
+      Buffer.from(""),
+    ],
+  );
+
+  return { importId: result.rows[0].id, workoutKey };
+}

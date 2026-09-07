@@ -369,7 +369,12 @@ into an existing user-owned dive. Merge candidates are existing dives without a
 Suunto workout id, ordered by closeness to the staged workout date. The merge
 flow is an explicit two-step dialog: first choose the target dive, then choose
 field-by-field whether each editable value survives from the reviewed Suunto
-import or from the existing dive, mirroring the dive-site merge workflow. Merging
+import or from the existing dive, mirroring the dive-site merge workflow. Each
+field is preselected rather than always defaulting to the import: whichever side
+actually has data wins, and if both sides do, the side with more decimal
+precision wins for the ten numeric measurement fields (depths, temps,
+visibility, cylinder size, pressures, weight) — see `lib/merge-fields.ts`'s
+`pickMergeSource`. The user can still override any field before merging. Merging
 attaches the Suunto workout id/profile/original bundle to the selected dive,
 deletes the staged import, and enqueues a normal edit backup in one transaction.
 

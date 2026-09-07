@@ -441,3 +441,43 @@ Added `startLiters` (= startPressure × cylinderSize) to `lib/gas-consumption.ts
 row and the dive form's live preview — to show `{used} L / {start} L`. Updated the unit tests and the
 e2e assertion that checked the old `"1800 L used"` text to match. Verified clean: typecheck, lint,
 `knip`, unit tests (105/105).
+
+## 2026-09-07 — autopilot: do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/18
+
+> /autopilot do this https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/18
+
+Issue #18: "Merge dives should preselect props smarter — values with data should be preselected
+over same props value without data, and values with better precision should be preselected over
+values with fewer precision." The Suunto-merge field picker (`components/dive-form.tsx`) previously
+initialized every one of the 34 merge fields to "import" unconditionally
+(`mergeChoices` useState initializer), regardless of which side actually had data.
+
+Extracted the decision logic into `lib/merge-fields.ts` (`pickMergeSource`/`mergeFieldHasData`/
+`decimalPrecision`), matching this codebase's existing pattern of pulling pure form logic into
+`lib/` for direct unit testing (see `lib/gas-consumption.ts`). Rule: whichever side has data wins;
+if both do, and the field is one of the ten numeric-precision fields (depths/temps/visibility/
+cylinder/pressures/weight), the side with more decimal digits wins (a dive computer's "23.7" beats
+a hand-typed "24" — `trimNumeric` already strips trailing zeros before these strings reach
+`FormState`, so decimal digits reflect real recorded precision, not DB formatting). Wired via a new
+`computeSmartMergeChoices` called from the "Choose surviving fields" button's `onClick`, so it
+recomputes against whichever target dive the user picked.
+
+Found and fixed a real, adjacent bug while building this: `app/settings/integrations/suunto/imports/
+[id]/page.tsx`'s `serializeMergeCandidate` formatted the *existing dive*'s numeric fields with a
+raw `String(value)` instead of `trimNumeric` (unlike `dive-form.tsx`'s own `stateFromDive`) — since
+those columns are `numeric(5,2)`/`numeric(4,1)`, Postgres always returns a fixed-scale string like
+"24.00". Left unfixed, every existing-dive-side numeric value would have shown 1-2 fake decimal
+digits of "precision" in the merge dialog, silently defeating the new precision comparison (and
+displaying "24.00" instead of "24" in the UI regardless of this issue).
+
+Added `tests/unit/merge-fields.test.ts` (11 cases: has-data-wins-over-no-data both directions,
+precision tie-break both directions, non-precision fields skip the comparison, boolean/number
+fields always count as populated) and a new WebKit e2e spec
+(`tests/e2e/suunto-merge-preselect.spec.ts`) seeding a target dive and a staged Suunto import
+directly via two new `tests/e2e/helpers/db.ts` helpers (`seedDive`, `seedSuuntoImport` — driving
+dive creation through the UI form raced `router.refresh()`/`router.push()`'s client-side transition
+when the very next step navigates away again), asserting both the preselected radio and the
+rendered trimmed text. Manually verified the e2e spec actually catches a regression by reverting
+the `onClick` wiring and confirming it fails, then restored the fix. Full suite green: typecheck,
+lint, `knip`, unit (116/116), the new e2e spec plus `dives.spec.ts`/`suunto-integrations.spec.ts`
+(no regressions from the `trimNumeric` fix).

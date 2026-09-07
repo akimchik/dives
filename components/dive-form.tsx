@@ -40,6 +40,7 @@ import { parseDepthProfile } from "@/lib/depth-profile";
 import { toDateTimeLocalValue, trimNumeric } from "@/lib/dive-format";
 import type { DiveInput, DiveRecord, RecentCylinder } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
+import { pickMergeSource } from "@/lib/merge-fields";
 import { cn } from "@/lib/utils";
 
 // Radix's Select has no concept of an empty value (an empty-string SelectItem throws), so
@@ -488,6 +489,34 @@ function formatMergeValue(value: FormState[MergeFieldKey]): string {
   return [site.name, site.location, site.lat && site.lng ? `${site.lat}, ${site.lng}` : null]
     .filter(Boolean)
     .join(" · ") || "--";
+}
+
+const PRECISION_MERGE_FIELDS = new Set<MergeFieldKey>([
+  "maxDepth",
+  "avgDepth",
+  "waterTemp",
+  "waterTempLow",
+  "airTemp",
+  "visibility",
+  "cylinderSize",
+  "startPressure",
+  "endPressure",
+  "weight",
+]);
+
+function computeSmartMergeChoices(
+  imported: FormState,
+  target: SuuntoMergeCandidateValues,
+): Record<MergeFieldKey, MergeSource> {
+  return Object.fromEntries(
+    mergeFields.map((field) => [
+      field.key,
+      pickMergeSource(imported[field.key], target[field.key], {
+        emptyChoiceValue: NONE,
+        comparePrecision: PRECISION_MERGE_FIELDS.has(field.key),
+      }),
+    ]),
+  ) as Record<MergeFieldKey, MergeSource>;
 }
 
 function mergeStates(
@@ -1166,7 +1195,12 @@ export function DiveForm({
                 <Button
                   type="button"
                   disabled={!canSubmit || selectedMergeTarget === null}
-                  onClick={() => setMergeStep("fields")}
+                  onClick={() => {
+                    if (selectedMergeTarget) {
+                      setMergeChoices(computeSmartMergeChoices(state, selectedMergeTarget.values));
+                    }
+                    setMergeStep("fields");
+                  }}
                 >
                   Choose surviving fields
                 </Button>

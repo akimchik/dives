@@ -9,6 +9,7 @@ import { DiveForm } from "@/components/dive-form";
 import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
 import { Card, CardContent } from "@/components/ui/card";
 import { listSuuntoMergeDiveCandidates, type SuuntoMergeDiveCandidate } from "@/lib/dives";
+import { trimNumeric } from "@/lib/dive-format";
 import {
   getFirstPendingSuuntoImportId,
   getNextPendingSuuntoImportId,
@@ -22,7 +23,11 @@ export const metadata: Metadata = {
 
 function serializeMergeCandidate(dive: SuuntoMergeDiveCandidate) {
   const text = (value: string | null) => value ?? "";
-  const numberText = (value: string | number | null) => (value === null ? "" : String(value));
+  // bottomTimeMinutes is an integer column, not numeric(5,2) -- trimNumeric is a no-op for it and
+  // correct for every other numeric field here, which pg returns as a fixed-scale string like
+  // "24.00" that must be trimmed the same way stateFromDive trims it, or the merge dialog's
+  // precision-based preselection would mistake DB padding for genuinely recorded precision.
+  const numberText = (value: string | number | null) => trimNumeric(value) ?? "";
   const choice = (value: string | null) => value ?? "__none__";
   const bodyOfWater = dive.body_of_water ?? "__none__";
 

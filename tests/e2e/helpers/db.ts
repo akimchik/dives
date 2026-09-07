@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { gzipSync } from "node:zlib";
 
 import pg from "pg";
 
@@ -50,4 +51,33 @@ export async function seedMagicLinkToken(email: string): Promise<string> {
 
 export function uniqueTestEmail(prefix: string): string {
   return `${prefix}-${randomBytes(6).toString("hex")}@example.com`;
+}
+
+// The real Suunto fetch/merge flow needs OAuth-equivalent credentials the e2e suite can't reach
+// (see tags.spec.ts's comment on missing-suunto coverage), so raw-preview e2e coverage seeds a
+// dive with a real gzip'd { files } bundle directly, mirroring what scripts/suunto-sidecar/server.mjs
+// actually produces (lib/suunto/raw-bundle.ts's extractSmlJson reads this same shape back out).
+export async function seedSuuntoDive(email: string, sml: unknown): Promise<{ diveId: number; workoutKey: string }> {
+  const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
+  if (user.rows.length === 0) throw new Error(`no user found for email ${email}`);
+
+  const workoutKey = `e2e-${randomBytes(6).toString("hex")}`;
+  const bundle = gzipSync(
+    Buffer.from(
+      JSON.stringify({
+        files: [
+          { path: "workout.sml.json", contentBase64: Buffer.from(JSON.stringify(sml)).toString("base64") },
+        ],
+      }),
+    ),
+  );
+
+  const result = await pool.query<{ id: number }>(
+    `insert into dives (user_id, title, occurred_at, suunto_workout_key, suunto_profile, suunto_original_bundle)
+     values ($1, 'Suunto raw preview e2e dive', now(), $2, $3, $4)
+     returning id`,
+    [user.rows[0].id, workoutKey, JSON.stringify({ source: "suunto", workoutKey, points: [] }), bundle],
+  );
+
+  return { diveId: result.rows[0].id, workoutKey };
 }

@@ -162,6 +162,14 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
               <CreatePadiDiveButton diveId={dive.id} />
             ) : null}
             {canUpdatePadi ? <UpdatePadiDiveButton diveId={dive.id} /> : null}
+            {dive.suunto_workout_key !== null ? (
+              <Link
+                href={`/dives/${dive.id}/raw`}
+                className={cn(buttonVariants({ variant: "outline" }), "no-underline")}
+              >
+                Raw Suunto data
+              </Link>
+            ) : null}
             <Link
               href={`/dives/${dive.id}/edit`}
               className={cn(buttonVariants({ variant: "outline" }), "no-underline")}

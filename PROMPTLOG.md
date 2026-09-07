@@ -362,3 +362,70 @@ unit tests (`lib/tags.ts`'s pure functions) and updated the existing dive_backup
 templates (`scripts/notifications/templates.mjs`) for the new array-typed column. Full suite green
 except two pre-existing `registration.test.ts` failures confirmed (via `git stash`) to predate this
 change — a local env config gap unrelated to tags.
+
+## 2026-09-07 13:07 CEST — Raw Suunto (SML) Preview (autopilot, issue #5)
+
+> /autopilot now let's implement https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/5
+
+Issue #5: "In the dive page, if SML data is available (dive was fetched or merged from Suunto), I
+want to be able to preview raw data. It should display full page with search and with tabs for:
+json object viewer, json syntax highlighted text."
+
+New route `/dives/[id]/raw`, linked from the dive detail page whenever `suunto_workout_key` is
+set. `lib/dives.ts`'s new `getDiveSuuntoOriginalBundle` is a narrowly-scoped, ownership-filtered
+query kept deliberately separate from `getDive`/`snapshotColumns` (that comment already said the
+bundle is "intentionally not part of snapshots/backups/DTOs" — this is the one deliberate
+exception). `lib/suunto/raw-bundle.ts`'s `extractSmlJson` promotes the gunzip/base64 extraction
+logic that previously only lived inline in `scripts/backfill-suunto-gas-rate.ts`. Unlike
+`SuuntoProfileChart` (narrowed to just `points` after a prior review flagged the whole profile
+blob unnecessarily crossing the server→client boundary), this page's entire purpose is showing the
+user their own raw data, so the full parsed SML JSON is passed to the client component on purpose
+— that's a deliberate call, not a regression of that earlier fix.
+
+New UI: `components/ui/tabs.tsx` (hand-written shadcn-style Radix wrapper — shadcn MCP wasn't
+available this session, matched the existing `collapsible.tsx`/`toggle-group.tsx` generator
+output instead), `components/json-tree-view.tsx` (collapsible object viewer, 3 levels expanded by
+default, arrays capped at 100 rendered items with a "show more" step so a Suunto profile's
+thousand-sample array doesn't dump into the DOM at once), `components/json-text-view.tsx`
+(regex-tokenized JSON syntax highlighting, falls back to a plain block past 250k formatted
+characters), and `lib/json-highlight.tsx`'s shared `<Highlight>` so both tabs' search-match
+`<mark>`s stay consistent; a single (debounced) search box (`components/suunto-raw-preview.tsx`)
+drives both tabs and the tree view auto-expands to/reveals a match hidden behind its default
+depth/reveal caps.
+
+Unit tests (`extractSmlJson` round-trip + malformed-bundle error), integration tests
+(`getDiveSuuntoOriginalBundle`'s ownership scoping and no-Suunto-data null case, against a real
+Postgres), and a new WebKit e2e spec (`tests/e2e/suunto-raw-preview.spec.ts`, seeding a dive with
+a real gzip bundle via a new `seedSuuntoDive` e2e helper since a real Suunto OAuth fetch is out of
+this suite's reach) all pass; full unit + e2e suites green, no regressions. Local `pnpm test:pg`
+integration run hit a pre-existing SASL auth gap in `tests/integration/helpers/pg.ts` (its pool
+doesn't merge `DATABASE_USER`/`DATABASE_PASSWORD` the way `lib/db.ts`'s real pool does) —
+confirmed via `git stash` to predate this change and affect every integration file, not just the
+new tests; worked around locally with an ad hoc script using the properly-merged connection string
+to verify the new query directly against the real schema instead of fixing that pre-existing gap
+(out of scope for this issue).
+
+An independent code-reviewer subagent pass (against a real ~1.56MB/89,543-node Suunto SML export
+sitting gitignored in this repo) caught two real HIGH-severity bugs neither the unit suite nor the
+2-sample e2e fixture exercised: (1) the syntax-highlighted tab's fallback threshold (2M chars) sat
+above the real export's 3.05M pretty-printed size, so it silently rendered zero highlighting with
+no explanation on an ordinary real dive; (2) the tree view's search had no cost bound on how many
+containers a query could force open — a single common character measured at 26k-31k rendered React
+nodes *per keystroke* (no debounce), which is a frozen tab in practice. Fixed: search input now
+debounces 250ms before reaching either view; tree search gained a 2-character minimum before
+auto-expand triggers plus a hard cap (1500 paths) on how many containers one query can force open;
+the text tab's highlight threshold dropped to 250k characters with an explicit "too large to
+syntax-highlight" notice instead of a silent no-op. Also fixed on the same pass: non-string leaves
+(numbers/booleans/null) weren't running through `<Highlight>`, so a search matching a numeric value
+opened its ancestors but marked nothing — now they do; a manually collapsed tree node could
+permanently hide a later, unrelated search's match — manual expand/collapse overrides now reset
+whenever the query itself changes (React's "adjust state during render" pattern, not an Effect,
+since `react-hooks/set-state-in-effect` flagged the first attempt); `extractSmlJson` really is now
+a single shared implementation (`scripts/backfill-suunto-gas-rate.ts` imports it) rather than the
+duplicate the first pass's commit message incorrectly claimed was already deduplicated; the new
+docs section had been inserted mid-paragraph, splitting the Suunto review-form description in two.
+Added a WebKit e2e case seeding a 4,000-sample dive to prove the array-reveal cap and the text-tab
+fallback both actually trigger and the tab stays responsive (707ms, not a hang) searching a match
+placed past every cap. Full battery re-run clean after fixes: typecheck, lint (including the
+`react-hooks/set-state-in-effect` catch), `knip`, unit (105/105), e2e (21/21 webkit), and
+`pnpm build`.

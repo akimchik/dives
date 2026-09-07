@@ -1,0 +1,36 @@
+import { gzipSync } from "node:zlib";
+
+import { describe, expect, it } from "vitest";
+
+import { extractSmlJson } from "@/lib/suunto/raw-bundle";
+
+function bundleOf(files: { path: string; contentBase64: string }[]): Buffer {
+  return gzipSync(Buffer.from(JSON.stringify({ files })));
+}
+
+describe("extractSmlJson", () => {
+  it("gunzips the bundle and parses the workout.sml.json entry", () => {
+    const sml = { Data: { Header: { Depth: 12.3 }, Samples: [] } };
+    const bundle = bundleOf([
+      { path: "workout.sml.json", contentBase64: Buffer.from(JSON.stringify(sml)).toString("base64") },
+      { path: "other.txt", contentBase64: Buffer.from("ignored").toString("base64") },
+    ]);
+
+    expect(extractSmlJson(bundle)).toEqual(sml);
+  });
+
+  it("throws when the bundle has no workout.sml.json file", () => {
+    const bundle = bundleOf([{ path: "other.txt", contentBase64: Buffer.from("x").toString("base64") }]);
+
+    expect(() => extractSmlJson(bundle)).toThrow(/workout\.sml\.json/);
+  });
+
+  it("throws (rather than silently returning garbage) on a bundle that isn't gzip at all", () => {
+    // Mirrors the placeholder bundles integration tests write (see tests/integration/dives.test.ts's
+    // stageSuunto helper, which stores a plain "bundle:<workoutKey>" string), which
+    // scripts/backfill-suunto-gas-rate.ts already has to skip over rather than crash on.
+    const notGzip = Buffer.from("bundle:not-a-real-export");
+
+    expect(() => extractSmlJson(notGzip)).toThrow();
+  });
+});

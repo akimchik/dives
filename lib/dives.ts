@@ -559,6 +559,32 @@ export async function getDive(userId: string, diveId: number): Promise<DiveRecor
   return result.rows[0] ?? null;
 }
 
+// Deliberately separate from getDive/snapshotColumns -- see the DiveSnapshot comment above:
+// suunto_original_bundle is intentionally excluded from every ordinary dive read, so the raw-data
+// preview page gets its own narrowly-scoped query instead of widening the shared one. Returns null
+// (never another user's row, and never a row with no bundle) so callers render not-found from
+// either case alike.
+export async function getDiveSuuntoOriginalBundle(
+  userId: string,
+  diveId: number,
+): Promise<{ workoutKey: string; originalBundle: Buffer } | null> {
+  const result = await queryRead<{ suunto_workout_key: string | null; suunto_original_bundle: Buffer | null }>(
+    `
+      select d.suunto_workout_key, d.suunto_original_bundle
+      from dives d
+      where d.id = $1
+        and d.user_id = $2
+      limit 1
+    `,
+    [diveId, userId],
+  );
+
+  const row = result.rows[0];
+  if (!row || row.suunto_workout_key === null || row.suunto_original_bundle === null) return null;
+
+  return { workoutKey: row.suunto_workout_key, originalBundle: row.suunto_original_bundle };
+}
+
 export async function listSuuntoMergeDiveCandidates(
   userId: string,
   preferredAt: Date | string | null,

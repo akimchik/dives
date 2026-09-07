@@ -10,11 +10,10 @@
 // also picks up any other compiler fix made since a row was first imported.
 //
 // Usage: pnpm suunto:backfill-gas-rate [-- --dry-run]
-import { gunzipSync } from "node:zlib";
-
 import pg from "pg";
 
 import { compileSuuntoDiveProfile } from "../lib/suunto/profile";
+import { extractSmlJson } from "../lib/suunto/raw-bundle";
 import { getDatabaseUrl, loadEnvFiles } from "./env.mjs";
 
 loadEnvFiles();
@@ -26,15 +25,6 @@ if (!databaseUrl) {
 
 const dryRun = process.argv.includes("--dry-run");
 const pool = new pg.Pool({ connectionString: databaseUrl });
-
-function extractSmlJson(originalBundle: Buffer): unknown {
-  const { files } = JSON.parse(gunzipSync(originalBundle).toString("utf8")) as {
-    files: { path: string; contentBase64: string }[];
-  };
-  const smlFile = files.find((file) => file.path === "workout.sml.json");
-  if (!smlFile) throw new Error('bundle has no "workout.sml.json" file');
-  return JSON.parse(Buffer.from(smlFile.contentBase64, "base64").toString("utf8"));
-}
 
 // Bundles that don't decode as the real gzip'd `{ files }` shape (e.g. integration-test fixtures
 // sharing this same local database, which write a plain placeholder string as their bundle -- see

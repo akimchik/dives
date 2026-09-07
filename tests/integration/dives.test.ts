@@ -29,6 +29,7 @@ const {
   getDive,
   getDiveActivityByDay,
   getDiveStats,
+  getDiveSuuntoOriginalBundle,
   listDiveSites,
   listDiveSitesWithDiveCounts,
   listDives,
@@ -630,6 +631,36 @@ describe("createDiveFromSuuntoImport (human-reviewed staged import path)", () =>
     const email = renderDiveBackupEmail(row.payload);
     expect(email.text).toContain("Suunto workout id:");
     expect(email.text).toContain("Suunto profile:");
+  });
+});
+
+describe("getDiveSuuntoOriginalBundle (raw Suunto data preview, issue #5)", () => {
+  it("returns the workout key and original bundle for the owning user", async () => {
+    const owner = await createOwner();
+    const staged = await stageSuunto(owner);
+    const result = await createDiveFromSuuntoImport(owner, staged.id, diveInput());
+    if (!result.inserted) throw new Error("expected insert");
+
+    const bundle = await getDiveSuuntoOriginalBundle(owner.id, result.dive.id);
+    expect(bundle?.workoutKey).toBe(staged.workoutKey);
+    expect(bundle?.originalBundle.toString("utf8")).toBe(`bundle:${staged.workoutKey}`);
+  });
+
+  it("returns null for another user's dive, not the bundle -- same not-found contract as getDive", async () => {
+    const owner = await createOwner();
+    const intruder = await createOwner();
+    const staged = await stageSuunto(owner);
+    const result = await createDiveFromSuuntoImport(owner, staged.id, diveInput());
+    if (!result.inserted) throw new Error("expected insert");
+
+    expect(await getDiveSuuntoOriginalBundle(intruder.id, result.dive.id)).toBeNull();
+  });
+
+  it("returns null for a dive that has no Suunto data", async () => {
+    const owner = await createOwner();
+    const dive = await createDive(owner, diveInput());
+
+    expect(await getDiveSuuntoOriginalBundle(owner.id, dive.id)).toBeNull();
   });
 });
 

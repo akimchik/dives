@@ -333,8 +333,9 @@ encrypted suuntool session JSON (`SUUNTO_SESSION_ENCRYPTION_KEY`, falling back t
 Suunto password. `suunto_imports` stores staged workout imports per user until the
 user reviews them. Saved dives carry `suunto_workout_key` plus the compiled
 `suunto_profile` JSON used by charts; the original exported bundle is retained in
-`suunto_original_bundle` but is deliberately not selected into ordinary dive
-snapshots/backups/UI DTOs.
+`suunto_original_bundle` but is deliberately not selected into `getDive`'s ordinary
+snapshot/backup/UI DTO query (`lib/dives.ts`'s `snapshotColumns`) — see "Raw Suunto
+data preview" below for the one place it is deliberately read back out.
 
 Duplicate handling mirrors PADI sync semantics: a Suunto workout key already
 saved to `dives` or already staged in `suunto_imports` is ignored. To re-import a
@@ -371,6 +372,56 @@ field-by-field whether each editable value survives from the reviewed Suunto
 import or from the existing dive, mirroring the dive-site merge workflow. Merging
 attaches the Suunto workout id/profile/original bundle to the selected dive,
 deletes the staged import, and enqueues a normal edit backup in one transaction.
+
+### Raw Suunto data preview
+
+`/dives/[id]/raw` (issue #5) is the one deliberate exception to `suunto_original_bundle`
+never being read back out: `lib/dives.ts`'s `getDiveSuuntoOriginalBundle(userId, diveId)`
+is a narrowly-scoped, ownership-filtered query kept separate from `getDive`/
+`snapshotColumns` on purpose, returning `null` (never another user's bundle) for a
+missing dive, another user's dive, or a dive with no Suunto data alike — the page
+renders the same `notFound()` for all three. `lib/suunto/raw-bundle.ts`'s
+`extractSmlJson` gunzips the bundle and parses out `workout.sml.json`; both this
+page and `scripts/backfill-suunto-gas-rate.ts` import that one implementation. A
+bundle that doesn't decode as that shape (e.g. a test fixture's placeholder bytes)
+renders an inline "couldn't be read" message rather than a 500. The dive detail
+page links to this route whenever `suunto_workout_key` is set, independent of
+whether the compiled `suunto_profile` chart itself renders.
+
+Unlike `SuuntoProfileChart` (which was deliberately narrowed to just `points` after
+a prior review flagged the whole profile blob crossing the server→client boundary
+unnecessarily — see above), this page's entire purpose is showing the user their
+own raw data, so the full parsed SML JSON is passed to the client on purpose. That
+distinction is about *what* crosses the boundary (data minimization: send only
+what a component renders vs. send everything because rendering everything is the
+feature), not about payload size — a real SML export gzips to tens of KB over the
+wire regardless.
+
+`components/suunto-raw-preview.tsx` renders a single (250ms-debounced, since a real
+export runs to tens of thousands of JSON nodes and recomputing on every keystroke
+is wasted work) search input over two `components/ui/tabs.tsx` tabs:
+`components/json-tree-view.tsx` (a collapsible object viewer, default-expanded 3
+levels deep, arrays capped at 100 rendered items with a "show more" step) and
+`components/json-text-view.tsx` (`JSON.stringify(data, null, 2)` with a
+regex-tokenized syntax highlighter, replaced with a plain block + an explicit
+"too large to highlight" notice past 250k characters — one `<span>` per JSON token
+means a real multi-megabyte export would otherwise turn into hundreds of thousands
+of React children). Both share `lib/json-highlight.tsx`'s `<Highlight>` for
+`<mark>`ing search matches, so the two tabs highlight matches consistently
+whenever both are actually rendering colored tokens — the size fallback above is
+the one case where the text tab intentionally stops highlighting (still fully
+readable and browser-`Ctrl+F`-searchable) while the tree tab, whose rendering cost
+is bounded by its own depth/reveal caps rather than total document size, keeps
+highlighting regardless of dive size.
+
+The tree view's search additionally walks the whole tree once per (debounced)
+query to compute which ancestor paths must auto-expand and how many array items to
+reveal so a match past the default cap isn't hidden. Two guards keep that bounded
+on a large, permissively-matching query (e.g. a single common letter): auto-expand
+only kicks in at 2+ characters, and a hard cap on how many containers one search
+is allowed to force open. Manual expand/collapse overrides reset whenever the
+query itself changes, so a node collapsed under one search can't silently hide a
+match under a later, different search.
 
 ## Tests
 

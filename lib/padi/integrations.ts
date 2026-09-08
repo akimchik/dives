@@ -7,6 +7,11 @@ export type PadiIntegrationStatus = {
   status: "connected" | "needs_reconnect";
   connectedAt: Date;
   syncedAt: Date | null;
+  // Drive the "back up before your first upload" nudge (issue #14): the prompt shows only while
+  // both are null, and setting either one (a completed backup or an explicit skip) suppresses it
+  // for good -- neither is ever cleared back to null by anything in this app.
+  backupDoneAt: Date | null;
+  backupPromptDismissedAt: Date | null;
 } | null; // null = no row at all, i.e. never connected
 
 // Every read/write here is scoped by the session's user_id (AGENTS.md rule 10), matching
@@ -16,7 +21,12 @@ export async function getPadiIntegrationStatus(userId: string): Promise<PadiInte
     status: string;
     connected_at: Date;
     synced_at: Date | null;
-  }>("select status, connected_at, synced_at from padi_integrations where user_id = $1", [userId]);
+    backup_done_at: Date | null;
+    backup_prompt_dismissed_at: Date | null;
+  }>(
+    "select status, connected_at, synced_at, backup_done_at, backup_prompt_dismissed_at from padi_integrations where user_id = $1",
+    [userId],
+  );
 
   const row = result.rows[0];
   if (!row) return null;
@@ -25,6 +35,8 @@ export async function getPadiIntegrationStatus(userId: string): Promise<PadiInte
     status: row.status as "connected" | "needs_reconnect",
     connectedAt: row.connected_at,
     syncedAt: row.synced_at,
+    backupDoneAt: row.backup_done_at,
+    backupPromptDismissedAt: row.backup_prompt_dismissed_at,
   };
 }
 
@@ -70,4 +82,14 @@ export async function savePadiIntegration(userId: string, input: SavePadiIntegra
 
 export async function deletePadiIntegration(userId: string): Promise<void> {
   await getPool().query("delete from padi_integrations where user_id = $1", [userId]);
+}
+
+export async function markPadiBackupDone(userId: string): Promise<void> {
+  await getPool().query("update padi_integrations set backup_done_at = now() where user_id = $1", [userId]);
+}
+
+export async function dismissPadiBackupPrompt(userId: string): Promise<void> {
+  await getPool().query("update padi_integrations set backup_prompt_dismissed_at = now() where user_id = $1", [
+    userId,
+  ]);
 }

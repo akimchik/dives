@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { connectPadiAction, disconnectPadiAction } from "@/app/actions/padi";
+import { BackupPadiButton } from "@/components/backup-padi-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,7 +68,8 @@ export function PadiConnectForm({ status }: { status: PadiConnectStatus }) {
         <p className="text-sm text-muted-foreground">
           Connected since {new Date(status.connectedAt).toLocaleDateString()}.
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <BackupPadiButton />
           <Button
             type="button"
             variant="outline"

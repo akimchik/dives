@@ -36,9 +36,20 @@ vi.mock("next/navigation", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 const loginMock = vi.fn();
+// backupPadiAction's real dependency (lib/padi/backup.ts) calls fetchLogbookPage/fetchLogbookDetail
+// through this same module, so both are mocked here too -- otherwise the backupPadiAction tests
+// below would make real HTTP calls to PADI. Default to an empty logbook so every other test in this
+// file (which never touches backup) is unaffected.
+const fetchLogbookPageMock = vi.fn().mockResolvedValue({ data: { logbook_logs: [] } });
+const fetchLogbookDetailMock = vi.fn();
 vi.mock("@/lib/padi/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/padi/client")>();
-  return { ...actual, login: (...args: unknown[]) => loginMock(...args) };
+  return {
+    ...actual,
+    login: (...args: unknown[]) => loginMock(...args),
+    fetchLogbookPage: (...args: unknown[]) => fetchLogbookPageMock(...args),
+    fetchLogbookDetail: (...args: unknown[]) => fetchLogbookDetailMock(...args),
+  };
 });
 
 // Lets a test simulate a successful PADI login followed by a LOCAL failure (e.g. a misconfigured
@@ -58,7 +69,8 @@ process.env.PADI_USERNAME_HASH_PEPPER = "test-pepper";
 
 const { createSession } = await import("@/lib/session");
 const { createUser } = await import("@/lib/users");
-const { connectPadiAction, disconnectPadiAction, syncPadiAction } = await import("@/app/actions/padi");
+const { backupPadiAction, connectPadiAction, disconnectPadiAction, dismissPadiBackupPromptAction, syncPadiAction } =
+  await import("@/app/actions/padi");
 const { PadiApiError } = await import("@/lib/padi/client");
 // vi.importActual, not a plain import -- "@/lib/padi/integrations" is mocked above, so importing
 // it normally here would just return the mock wrapper again (calling it would recurse into
@@ -68,6 +80,23 @@ const { savePadiIntegration: realSavePadiIntegration } =
 
 function fakeTokens() {
   return { tokens: { accessToken: "access", refreshToken: "refresh", idToken: "id", expiresIn: 3600, tokenType: "Bearer" } };
+}
+
+// backupPadiAction needs a real, decodable idToken (getPadiCredentials reads the
+// `custom:affiliate_id` claim out of it) -- fakeTokens()'s plain "id" string isn't one, so this
+// mirrors tests/integration/padi-sync.test.ts's own fakeIdToken helper instead.
+function fakeTokensWithAffiliate(affiliateId: string) {
+  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ "custom:affiliate_id": affiliateId })).toString("base64url");
+  return {
+    tokens: {
+      accessToken: "access",
+      refreshToken: "refresh",
+      idToken: `${header}.${payload}.signature`,
+      expiresIn: 3600,
+      tokenType: "Bearer",
+    },
+  };
 }
 
 async function loginAsNewUser() {
@@ -90,6 +119,8 @@ beforeEach(() => {
   loginMock.mockReset();
   saveIntegrationMock.mockReset();
   saveIntegrationMock.mockImplementation(realSavePadiIntegration);
+  fetchLogbookPageMock.mockReset().mockResolvedValue({ data: { logbook_logs: [] } });
+  fetchLogbookDetailMock.mockReset();
 });
 
 afterAll(async () => {
@@ -214,5 +245,57 @@ describe("syncPadiAction", () => {
 
     const result = await syncPadiAction();
     expect(result).toMatchObject({ ok: false, reason: "not_connected" });
+  });
+});
+
+describe("backupPadiAction", () => {
+  it("returns not_connected before touching PADI when the user has never connected", async () => {
+    await loginAsNewUser();
+
+    const result = await backupPadiAction();
+    expect(result).toMatchObject({ ok: false, reason: "not_connected" });
+  });
+
+  it("downloads every dive in the logbook and records backup_done_at (issue #14)", async () => {
+    const user = await loginAsNewUser();
+    loginMock.mockResolvedValue(fakeTokensWithAffiliate("11223344"));
+    await connectPadiAction("diver@example.com", "hunter2");
+
+    fetchLogbookPageMock.mockResolvedValueOnce({
+      data: { logbook_logs: [{ id: 901001 }, { id: 901002 }] },
+    });
+    fetchLogbookDetailMock.mockImplementation(async (_bearer: string, _affiliateId: string, id: number) => ({
+      data: { logbook_logs: [{ id, dive_title: `Dive ${id}` }] },
+    }));
+
+    const result = await backupPadiAction();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.count).toBe(2);
+    expect(JSON.parse(result.data).dives).toHaveLength(2);
+
+    const row = await getTestPool().query<{ backup_done_at: Date | null }>(
+      "select backup_done_at from padi_integrations where user_id = $1",
+      [user.id],
+    );
+    expect(row.rows[0].backup_done_at).not.toBeNull();
+  });
+});
+
+describe("dismissPadiBackupPromptAction", () => {
+  it("records backup_prompt_dismissed_at for the current user, without touching backup_done_at", async () => {
+    const user = await loginAsNewUser();
+    loginMock.mockResolvedValue(fakeTokensWithAffiliate("11223344"));
+    await connectPadiAction("diver@example.com", "hunter2");
+
+    const result = await dismissPadiBackupPromptAction();
+    expect(result).toEqual({ ok: true });
+
+    const row = await getTestPool().query<{ backup_done_at: Date | null; backup_prompt_dismissed_at: Date | null }>(
+      "select backup_done_at, backup_prompt_dismissed_at from padi_integrations where user_id = $1",
+      [user.id],
+    );
+    expect(row.rows[0].backup_prompt_dismissed_at).not.toBeNull();
+    expect(row.rows[0].backup_done_at).toBeNull();
   });
 });

@@ -143,6 +143,10 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
     dive.log_type === "Recreational" &&
     dive.log_course === null &&
     padiIntegration?.status === "connected";
+  const needsPadiBackupPrompt =
+    padiIntegration?.status === "connected" &&
+    padiIntegration.backupDoneAt === null &&
+    padiIntegration.backupPromptDismissedAt === null;
 
   const coordinates =
     dive.site_lat !== null && dive.site_lng !== null
@@ -209,7 +213,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
 
           <div className="flex items-center gap-2">
             {dive.padi_dive_id === null && padiIntegration?.status === "connected" ? (
-              <CreatePadiDiveButton diveId={dive.id} />
+              <CreatePadiDiveButton diveId={dive.id} needsBackupPrompt={needsPadiBackupPrompt} />
             ) : null}
             {canUpdatePadi ? <UpdatePadiDiveButton diveId={dive.id} /> : null}
             {dive.suunto_workout_key !== null ? (

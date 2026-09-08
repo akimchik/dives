@@ -6,8 +6,9 @@ import { requireUser } from "@/lib/session";
 import { getDive } from "@/lib/dives";
 import { assertKeyConfigured } from "@/lib/padi/crypto";
 import { login, PadiApiError } from "@/lib/padi/client";
-import { deletePadiIntegration, savePadiIntegration } from "@/lib/padi/integrations";
+import { deletePadiIntegration, dismissPadiBackupPrompt, savePadiIntegration } from "@/lib/padi/integrations";
 import { checkRateLimit, hashUsername, isRateLimited, recordFailedAttempt } from "@/lib/padi/rate-limit";
+import { fetchPadiBackup, type BackupPadiLogbookResult } from "@/lib/padi/backup";
 import { createDiveInPadi, type CreatePadiDiveResult } from "@/lib/padi/create";
 import { syncPadiLogbook, type SyncPadiResult } from "@/lib/padi/sync";
 import { updateDiveInPadi, type UpdatePadiDiveResult } from "@/lib/padi/update";
@@ -108,6 +109,26 @@ export async function syncPadiAction(): Promise<SyncPadiResult> {
   }
 
   return result;
+}
+
+export async function backupPadiAction(): Promise<BackupPadiLogbookResult> {
+  const user = await requireUser();
+  const result = await fetchPadiBackup(user);
+
+  if (result.ok) {
+    revalidatePadiPaths();
+  }
+
+  return result;
+}
+
+// Called when the user explicitly skips the "back up before your first upload" nudge (issue #14)
+// on CreatePadiDiveButton -- always chained straight into createPadiDiveAction from there, so this
+// itself doesn't need to revalidate anything beyond what that follow-up call already does.
+export async function dismissPadiBackupPromptAction(): Promise<PadiActionResult> {
+  const user = await requireUser();
+  await dismissPadiBackupPrompt(user.id);
+  return { ok: true };
 }
 
 export async function createPadiDiveAction(diveId: number): Promise<CreatePadiDiveActionResult> {

@@ -5,13 +5,9 @@ import pg from "pg";
 import { createDiveFromPadi, findDiveByPadiId, markPadiComparison, type DiveOwner } from "@/lib/dives";
 import { getPool, queryRead } from "@/lib/db";
 import { getDatabaseUrl } from "@/lib/database-url";
-import { assertKeyConfigured, decryptSecret, keyFromEnvValue } from "./crypto";
-import {
-  PadiApiError,
-  decodeIdTokenClaims,
-  fetchLogbookDetail as defaultFetchLogbookDetail,
-  fetchLogbookPage as defaultFetchLogbookPage,
-} from "./client";
+import { getPadiCredentials, isPadiReconnectRequired } from "./auth";
+import { mapWithConcurrency } from "./concurrency";
+import { fetchLogbookDetail as defaultFetchLogbookDetail, fetchLogbookPage as defaultFetchLogbookPage } from "./client";
 import { mapPadiLogToDive, type PadiLogbookDetail } from "./field-map";
 import { isPadiRecreationalRecord, padiDiffersFromLocal } from "./diff";
 
@@ -36,12 +32,6 @@ export type SyncPadiResult =
   | { ok: true; imported: number; skipped: number; needsUpdate: number; remaining: boolean }
   | { ok: false; error: string; reason: "not_connected" | "reconnect_required" | "in_progress" | "infrastructure" };
 
-interface PadiIntegrationRow {
-  access_token_encrypted: string;
-  id_token_encrypted: string;
-  status: string;
-}
-
 interface PadiLogbookClient {
   fetchLogbookPage: typeof defaultFetchLogbookPage;
   fetchLogbookDetail: typeof defaultFetchLogbookDetail;
@@ -51,14 +41,6 @@ const defaultPadiClient: PadiLogbookClient = {
   fetchLogbookPage: defaultFetchLogbookPage,
   fetchLogbookDetail: defaultFetchLogbookDetail,
 };
-
-async function getIntegration(userId: string): Promise<PadiIntegrationRow | null> {
-  const result = await queryRead<PadiIntegrationRow>(
-    "select access_token_encrypted, id_token_encrypted, status from padi_integrations where user_id = $1",
-    [userId],
-  );
-  return result.rows[0] ?? null;
-}
 
 // Optimization only, not a correctness mechanism -- createDiveFromPadi's on-conflict-do-nothing
 // insert is the actual dedup authority. This just avoids a detail-fetch round trip per dive PADI has
@@ -71,28 +53,6 @@ async function alreadyImportedIds(userId: string, padiDiveIds: number[]): Promis
     [userId, padiDiveIds],
   );
   return new Set(result.rows.map((row) => row.padi_dive_id));
-}
-
-// Small fixed-concurrency map -- no existing concurrency-limiter utility elsewhere in this repo, and
-// pulling in a dependency for this one call site isn't warranted.
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await fn(items[index]);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return results;
-}
-
-function isReconnectRequired(error: unknown): boolean {
-  return error instanceof PadiApiError && error.status === 401;
 }
 
 /**
@@ -109,40 +69,9 @@ export async function syncPadiLogbook(
   owner: DiveOwner,
   { padiClient = defaultPadiClient }: { padiClient?: PadiLogbookClient } = {},
 ): Promise<SyncPadiResult> {
-  const integration = await getIntegration(owner.id);
-
-  if (!integration) {
-    return { ok: false, error: "PADI is not connected", reason: "not_connected" };
-  }
-  if (integration.status !== "connected") {
-    return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
-  }
-
-  let bearerToken: string;
-  let affiliateId: string;
-  try {
-    assertKeyConfigured(process.env.PADI_TOKEN_ENCRYPTION_KEY);
-    const key = keyFromEnvValue(process.env.PADI_TOKEN_ENCRYPTION_KEY);
-    const previousKey = process.env.PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS
-      ? keyFromEnvValue(process.env.PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS)
-      : undefined;
-
-    // The logbook API validates the JWT sent as `Authorization: Bearer` against its own
-    // `custom:affiliate_id` claim, so despite the OAuth-shaped token set it's the idToken that
-    // belongs here, not the accessToken -- a real browser session does the same (confirmed via
-    // scripts/padi/debug-logbook.mjs: the accessToken gets a 403 "affiliateid and idtoken don't
-    // match", the idToken gets a 200).
-    bearerToken = decryptSecret(integration.id_token_encrypted, key, `${owner.id}:id`, previousKey);
-    const claims = decodeIdTokenClaims(bearerToken);
-    if (!claims.affiliateId) throw new Error("PADI idToken is missing custom:affiliate_id");
-    affiliateId = String(claims.affiliateId);
-  } catch (error) {
-    // A misconfigured/rotated-out encryption key is an infrastructure problem, never a PADI-side
-    // rejection -- must never be conflated with "needs_reconnect" (see the cronjob's identical
-    // classification rule in scripts/padi/token-refresh.mjs).
-    console.error("PADI sync failed to decrypt stored tokens", error);
-    return { ok: false, error: "Sync temporarily unavailable", reason: "infrastructure" };
-  }
+  const credentials = await getPadiCredentials(owner.id);
+  if (!credentials.ok) return credentials;
+  const { bearerToken, affiliateId } = credentials;
 
   // Dedicated, single-use client for the advisory lock -- deliberately not a pooled connection.
   // pg_try_advisory_lock is session-scoped: it lives and dies with this one connection, so closing
@@ -207,7 +136,7 @@ async function runSync({
     try {
       page = await padiClient.fetchLogbookPage(bearerToken, affiliateId, { limit: PAGE_SIZE, offset });
     } catch (error) {
-      if (isReconnectRequired(error)) {
+      if (isPadiReconnectRequired(error)) {
         return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
       }
       console.error("PADI sync failed while listing the logbook", error);
@@ -227,7 +156,7 @@ async function runSync({
         const detail = await padiClient.fetchLogbookDetail(bearerToken, affiliateId, id);
         return { ok: true as const, id, alreadyImported: alreadyImported.has(id), record: detail?.data?.logbook_logs?.[0] };
       } catch (error) {
-        if (isReconnectRequired(error)) {
+        if (isPadiReconnectRequired(error)) {
           reconnectRequired = true;
         } else {
           console.error(`PADI sync failed to fetch logbook detail ${id}`, error);

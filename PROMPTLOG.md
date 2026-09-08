@@ -1039,3 +1039,39 @@ the check) until the listener is actually live, which fixes the race
 regardless of exactly how long hydration takes on a given CI run, rather
 than tuning yet another guessed timeout number. 27/27 e2e specs,
 lint/knip/typecheck all green locally.
+
+## 2026-09-08 22:14 — Autopilot: Add backup PADI feature (issue #14)
+
+> /autopilot do https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/14
+
+Issue #14: "On the Integrations page a PADI Backup button should fetch all
+PADI dives and download that file (timestamped) via the browser. If user
+never did backup of PADI dives, he should be advised to execute one when he
+first time tries upload dive to PADI. If he skips it, then do not show it
+next time."
+
+Migration `029_padi_backup_tracking.sql` adds `backup_done_at`/
+`backup_prompt_dismissed_at` to `padi_integrations`. Extracted the
+credential-decrypt logic and the fixed-concurrency page walker that
+`lib/padi/sync.ts` already had into `lib/padi/auth.ts` /
+`lib/padi/concurrency.ts` so the new `lib/padi/backup.ts` (walks the full
+logbook via the same paginated endpoint, returns raw records as one
+timestamped JSON payload, no advisory lock since it's read-only) doesn't
+duplicate security-sensitive token-decrypt code; refactor verified
+behavior-preserving via the existing 22 PADI integration tests, all still
+green. `backupPadiAction` downloads the file client-side via a new
+`lib/download-file.ts` (`Blob` + `URL.createObjectURL`, no separate
+authenticated route needed) from a new "Backup PADI dives" button on the
+Integrations page. `CreatePadiDiveButton`'s first "Create in PADI" click
+now shows a controlled AlertDialog (mirroring `delete-dive-button.tsx`'s
+pattern, since both its real choices are async) offering "Back up now" or
+"Skip and upload" whenever both tracking columns are still null; either
+choice permanently suppresses the nudge.
+
+Added `tests/integration/padi-backup.test.ts` (6 cases) plus
+`backupPadiAction`/`dismissPadiBackupPromptAction` coverage in
+`padi-actions.test.ts` (4 new cases). Full verification: typecheck/lint/
+knip clean, 160/160 unit tests, 108/108 Postgres integration tests, and a
+throwaway Playwright/WebKit smoke spec (since deleted) confirming the
+button, dialog, cancel/skip/dismiss-persistence flows in a real browser
+against 30/30 green e2e specs.

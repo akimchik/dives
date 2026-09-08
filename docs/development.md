@@ -436,6 +436,30 @@ Requires `PADI_TOKEN_ENCRYPTION_KEY` and `PADI_USERNAME_HASH_PEPPER` (see
 `.env.example`); both are read lazily, so an unconfigured checkout still boots
 and serves every non-PADI page/test normally.
 
+### PADI backup (issue #14)
+
+`lib/padi/auth.ts`'s `getPadiCredentials` (decrypting the stored idToken and
+resolving the affiliate id) and `lib/padi/concurrency.ts`'s
+`mapWithConcurrency` are shared between `lib/padi/sync.ts` and
+`lib/padi/backup.ts`, since both walk the same paginated logbook endpoint —
+sync imports into `dives`, backup just collects the raw records. The
+Integrations page's "Backup PADI dives" button
+(`backupPadiAction` → `fetchPadiBackup`) walks the full logbook and returns it
+as one timestamped JSON file, downloaded client-side via
+`lib/download-file.ts`'s `downloadTextFile` (a `Blob` + `URL.createObjectURL`,
+no separate authenticated download route needed). Unlike sync it takes no
+advisory lock (read-only) and, since a partial backup file would be
+misleading, treats hitting its wall-time budget as a real failure
+(`reason: "too_large"`) rather than a resumable partial result. A successful
+backup sets `padi_integrations.backup_done_at`.
+
+`CreatePadiDiveButton` (the "Create in PADI" / first-upload action) shows a
+one-time nudge dialog — "Back up your PADI logbook first?" — whenever
+`backup_done_at` and `backup_prompt_dismissed_at` are both still null.
+"Back up now" runs the same backup flow in place; "Skip and upload" calls
+`dismissPadiBackupPromptAction` (setting `backup_prompt_dismissed_at`) and
+proceeds straight to the upload. Either choice permanently suppresses the
+prompt — neither column is ever cleared back to null.
 
 ## Suunto staged imports
 

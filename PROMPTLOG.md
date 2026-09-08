@@ -841,3 +841,36 @@ natively, redundant with but harmless alongside this app's own highlight.
 160 unit tests, 99 integration tests, all 26 e2e specs (bookmarks.spec.ts now
 actually asserts the highlighted `<mark>` appears, not just the URL shape),
 lint/knip/typecheck/build all green.
+
+## 2026-09-08 12:16 - Follow-up: Bookmark button missing for Notes, Suit, Also worn, Conditions & company
+
+> Some props are not showing Bookmark button. Like Notes, Suite, Also worn and all Conditions & company
+
+Root cause: components/bookmark-capture.tsx positioned the floating
+"Bookmark" button by adding `window.scrollX`/`scrollY` to
+`range.getBoundingClientRect()` -- correct for a `position: absolute`
+element (document-relative), but the button is `position: fixed`
+(viewport-relative), for which `getBoundingClientRect()` is already the
+right coordinate space. The added scroll offset pushed the button further
+off-screen the more the page was scrolled to reach the selection, which is
+exactly the pattern reported: Profile fields near the top of an unscrolled
+page happened to still land close enough to be visible, while Suit/Also worn
+(bottom of Gear & gas), all of Conditions & company, and Notes -- each
+requiring progressively more scroll to reach -- pushed the button
+progressively further below the viewport, i.e. still rendered, just
+invisible. Fixed by using the viewport-relative rect directly (clamped to a
+min of 8px so it doesn't clip off the top/left edge for a selection right at
+the viewport boundary).
+
+Added a real regression test for this: the existing bookmarks.spec.ts test's
+default ~720px-tall Playwright viewport happened to fit the whole (short)
+test dive without any scrolling, so it could never have caught a
+scroll-dependent bug -- `window.scrollY` was always 0. Set a shorter
+400px-tall viewport and padded the test dive's notes with filler text so the
+page genuinely overflows it, then assert the button's bounding box actually
+falls inside the viewport (`toBeVisible()` alone doesn't check that -- it
+only requires a non-zero box, which an off-screen-but-rendered element still
+has). Verified this test fails against the pre-fix code (button at y=467.7
+against a 400px viewport) and passes after the fix, before moving on. 160
+unit tests, 99 integration tests, all 26 e2e specs, lint/knip/typecheck/build
+all green.

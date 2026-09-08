@@ -15,8 +15,21 @@ import { uniqueTestEmail } from "./helpers/db";
 // Safari and this project's own Playwright WebKit build both discard that directive without ever
 // highlighting anything (see lib/text-fragment.ts's file comment), so a bookmark-text= fragment
 // segment ahead of it is what this app actually reads back and acts on.
+// A shorter-than-default viewport forces real scrolling to reach the Notes card below it -- a
+// regression test for the button-position bug (issue #6 follow-up) where the floating "Bookmark"
+// button was positioned as if `position: absolute` (adding window.scrollY/scrollX to an
+// already-viewport-relative getBoundingClientRect()) while actually being `position: fixed`,
+// pushing it further off-screen the more the page was scrolled. The default "Desktop Safari"
+// viewport is tall enough that this minimal test dive fits without scrolling at all, which is
+// exactly why that bug shipped unnoticed: window.scrollY was always 0.
+test.use({ viewport: { width: 1280, height: 400 } });
+
 const PASSWORD = "a-long-enough-password-123";
-const NOTES = "Saw a hawksbill turtle near the coral wall.";
+// Filler pads the page past the 400px viewport height above -- neither alone is enough: the short
+// notes text alone doesn't push the page past even a 400px viewport, and the filler alone doesn't
+// push it past the *default* ~720px viewport (which is why the original bug shipped unnoticed).
+const FILLER = "Uneventful stretch of the dive with nothing notable to record here. ".repeat(30);
+const NOTES = `${FILLER}Saw a hawksbill turtle near the coral wall.`;
 const BOOKMARKED_WORD = "hawksbill";
 
 async function logDiveWithNotes(page: import("@playwright/test").Page, title: string) {
@@ -58,10 +71,22 @@ test.describe("dive bookmarks", () => {
     await registerViaMagicLink(page, uniqueTestEmail("bookmarks"), PASSWORD);
     const diveId = await logDiveWithNotes(page, "Afternoon reef dive");
 
+    // Scroll down first, as a real user would before selecting text near the bottom of a long
+    // dive page -- this is what exposed the position bug above.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     await selectWordInNotes(page, BOOKMARKED_WORD);
 
     const bookmarkButton = page.getByTestId("bookmark-selection-button");
     await expect(bookmarkButton).toBeVisible();
+    const viewport = page.viewportSize();
+    const buttonBox = await bookmarkButton.boundingBox();
+    expect(buttonBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    // Must land inside the visible viewport, not merely be "visible" in Playwright's sense (which
+    // only checks for a non-zero box, not that it's on-screen) -- an element positioned hundreds
+    // of pixels below the viewport still passes toBeVisible().
+    expect(buttonBox!.y).toBeGreaterThanOrEqual(0);
+    expect(buttonBox!.y).toBeLessThan(viewport!.height);
     await bookmarkButton.click();
 
     await expect(page.getByRole("dialog", { name: "Bookmark this text" })).toBeVisible();

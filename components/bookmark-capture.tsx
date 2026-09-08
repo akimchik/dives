@@ -65,8 +65,14 @@ export function BookmarkCapture({ diveId, containerId }: { diveId: number; conta
         return;
       }
 
+      // getBoundingClientRect() is already viewport-relative, which is exactly what a `fixed`-
+      // positioned element needs -- adding window.scrollX/scrollY here (as if this were
+      // `absolute`-positioned against the document) pushed the button further off-screen the
+      // more the page was scrolled, which is why it silently failed to appear for any selection
+      // below the fold (e.g. Notes, near the bottom of a long dive page) while still "working"
+      // near the top of an unscrolled page.
       const rect = range.getBoundingClientRect();
-      setButtonPosition({ top: rect.top + window.scrollY - 40, left: rect.left + window.scrollX });
+      setButtonPosition({ top: Math.max(8, rect.top - 40), left: Math.max(8, rect.left) });
       setSelectedText(text.slice(0, MAX_BOOKMARK_TEXT_LENGTH));
     }
 

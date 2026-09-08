@@ -160,7 +160,14 @@ test.describe("dive bookmarks", () => {
     await page.getByLabel("Depth profile").fill("0:00, 0\n3:00, 12.4\n18:00, 27.1\n25:00, 0");
     await page.getByRole("button", { name: "Log dive" }).click();
     await page.waitForURL(/\/dives\/\d+$/);
-    await expect(page.getByRole("heading", { name: "Wreck Explorer Special" })).toBeVisible();
+    // A generous timeout here, not the suite's usual 5s default: this is the first e2e spec to
+    // render a dive with a real depth profile on its detail page, so it's also the first request
+    // that forces Next dev's on-demand compiler to bundle DepthProfileChart's recharts/d3 chain --
+    // consistently fast locally, but CI's shared runners are measurably slower (see
+    // playwright.config.ts's comment on the CI-only 60s per-test budget) and blew past 5s here.
+    await expect(page.getByRole("heading", { name: "Wreck Explorer Special" })).toBeVisible({
+      timeout: 20_000,
+    });
 
     await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");
     await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();

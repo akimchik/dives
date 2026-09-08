@@ -935,3 +935,36 @@ still shows no button. 160 unit tests, 98/99 integration tests (1 pre-existing
 flaky concurrent-claim test in notification-queue.test.mjs, unrelated to this
 change and passing in isolation), all 27 e2e specs, lint/knip/typecheck/build
 all green.
+
+## 2026-09-08 15:17 - Follow-up: CI failing again on the new scope-coverage test
+
+> CI is again failing:
+>
+>     Call log:
+>       - Expect "toBeVisible" with timeout 5000ms
+>       - waiting for getByRole('heading', { name: 'Wreck Explorer Special' })
+>
+>     1 failed
+>     [webkit] > tests/e2e/bookmarks.spec.ts:153:7 > dive bookmarks > bookmark button also appears over the title/subtitle heading and a profile chart's caption
+
+Pulled the actual Gitea Actions run logs via `tea actions runs logs 436`
+rather than guessing from the pasted snippet alone. Confirmed CI is running
+far slower than the previous commit's "measurably slower" framing implied:
+the main bookmarks test took 11.1s in CI vs ~3s locally, and dives.spec.ts's
+create->edit->delete flow took 42.2s in CI vs ~5s locally -- a genuine 4-8x
+slowdown across the board, not something specific to this test. On top of
+that, the new scope-coverage test's dive is the first in the entire e2e run
+to render a real depth-profile chart on a dive's detail page (the existing
+"malformed depth profile" test only exercises the form's live preview, never
+the detail page), making it also the first request in that CI run to force
+Next dev's on-demand compiler to bundle DepthProfileChart's recharts/d3
+chain -- a well-known slow-to-cold-compile dependency in dev mode. Both
+factors together plausibly blew past the suite's flat 5s per-assertion
+default well before the dive's heading ever needed to be genuinely slow to
+render on a built/production app -- this is a CI-only test-timing artifact
+of Next dev's lazy compilation, not a functional bug.
+
+Bumped just that one assertion's timeout to 20s (proportionate against the
+42s the heaviest existing CI-run test step took) rather than raising the
+suite's global default. 27/27 e2e specs, lint/knip/typecheck all green
+locally.

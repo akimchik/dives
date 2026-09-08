@@ -120,8 +120,9 @@ same dive produce two outbox rows instead of collapsing into one.
 | `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, distinct sites — the earlier "Deepest dive" tile was dropped to make room) + two SAC-rate tiles: last-5-dive average, and a p50/p90 pair as a single slash-joined value, e.g. "15/19 L/min" (`lib/sac-rate.ts`'s `diveSacRate`/`average`/`percentile`, issue #23 — a raw average alone reads as "typical" but is skewed by outlier dives, so p50 is the actual "typical" figure and p90 the worst-case tail) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + two collapsible radar-chart sections, "Seasonality" and "Distributions" (`components/dive-radar-charts.tsx`, data from `lib/dive-radar-stats.ts`'s `buildDiveRadarStats`, hidden entirely when the user has no dives) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
 | `/dives` | The whole logbook, newest first, with a full tag cloud and `?tag=` filtering (see "Tags" below) + the connected integration fetch buttons for PADI/Suunto (moved here from `/dashboard` per issue #21) |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
-| `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, an update-to-PADI action for linked recreational dives marked out-of-sync, and its SAC rate colored red/green against the average of the 5 chronologically preceding dives (issue #23) |
+| `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, an update-to-PADI action for linked recreational dives marked out-of-sync, its SAC rate colored red/green against the average of the 5 chronologically preceding dives (issue #23), and text-selection bookmarking over its property/notes content (issue #6, see "Bookmarks" below) |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
+| `/bookmarks` | Every bookmark the user has saved, each linking back to its dive with a `#:~:text=` fragment naming the originally-selected text (see "Bookmarks" below) |
 
 ### Dashboard radar charts
 
@@ -177,12 +178,50 @@ indistinguishable.
 
 Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
 every authenticated screen), `manage-menu.tsx` (the header menu linking to Dive
-Sites and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
+Sites, Bookmarks and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
 over the user's own sites, with inline create), `tags-field.tsx` (the same
 autocomplete-chip pattern for tags), `dive-sites-manager.tsx`,
-`depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx` and
-`delete-dive-button.tsx`. Every button that makes a server call follows `AGENTS.md`'s convention:
+`depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx`,
+`delete-dive-button.tsx`, `bookmark-capture.tsx` and `bookmarks-list.tsx`. Every button
+that makes a server call follows `AGENTS.md`'s convention:
 disabled with a spinner for the duration, then a sonner toast on the result.
+
+### Bookmarks
+
+Issue #6: select a piece of a dive's properties/notes, name it, and later jump
+straight back to that exact text from a `/bookmarks` list. Backed by
+`dive_bookmarks` (migration `028_dive_bookmarks.sql`; per-user like every other
+table here, plus `dive_id references dives (id) on delete cascade` so a
+deleted dive silently takes its bookmarks with it) and `lib/bookmarks.ts`
+(`createBookmark`/`listBookmarks`/`deleteBookmark`, wrapped by
+`app/actions/bookmarks.ts`'s `"use server"` actions). `createBookmark` re-checks
+dive ownership itself with a `where d.id = $2 and d.user_id = $1` join at
+insert time — a `diveId` is client-supplied input, so it's never trusted the
+way a dive fetched from `getDive()` already would be.
+
+The location back to that text is a [URL fragment text
+directive](https://wicg.github.io/scroll-to-text-fragment/) (`#:~:text=…`),
+built by the one-line `lib/text-fragment.ts`. There is deliberately no
+matching parser on this app's side to read the directive back out and
+highlight it by hand: the `:~:` marker is a *fragment directive*, and every
+browser that recognizes the syntax strips it from script-visible state
+(`location.hash`) once applied, before any page JS runs — confirmed against
+this project's own Playwright WebKit build, where even a bare `page.goto()`
+to a `:~:text=` URL comes back with an empty hash. That's the spec's own
+design (a page must not be able to read what text a link claimed to
+highlight), so the browser's own native handling is the only thing that ever
+acts on it — where a browser doesn't implement the spec, the link still
+navigates correctly, it just doesn't scroll/highlight on its own.
+
+`components/bookmark-capture.tsx`, mounted on `/dives/[id]`, is what makes a
+selection bookmarkable in the first place: a `selectionchange` listener shows
+a floating "Bookmark" button whenever the current selection sits entirely
+inside `#dive-bookmark-scope` (the property `DetailGroup`s + notes card;
+deliberately excludes the map and charts) *and* within a single element
+(`anchorNode.parentElement === focusNode.parentElement`) — a selection
+spanning multiple fields is rejected rather than accepted and turned into a
+fragment directive nothing can cleanly match. Clicking it opens a naming
+dialog and calls `createBookmarkAction`.
 
 ### Tags
 

@@ -771,3 +771,37 @@ testid and `tests/e2e/sac-rate.spec.ts`'s dashboard assertions to match.
 `lib/getDiveStats`'s `deepestDepth` field itself is untouched (still
 computed, just no longer rendered) since other code may still depend on it.
 151 unit tests, all 25 e2e specs, lint/knip/typecheck/build all green.
+
+## 2026-09-08 10:45 - Autopilot: issue #6, bookmark dive properties
+
+> work on https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/6
+
+Implemented issue #6 end to end: select a piece of a dive's properties/notes
+on `/dives/[id]`, name it via `components/bookmark-capture.tsx`'s floating
+"Bookmark" button + dialog, and later jump back to it from a new `/bookmarks`
+list page (nav entry added to `components/manage-menu.tsx`). Backed by a new
+`dive_bookmarks` table (`migrations/028_dive_bookmarks.sql`, per-user like
+every other table, `dive_id references dives (id) on delete cascade`) and
+`lib/bookmarks.ts` (`createBookmark` re-checks dive ownership itself at
+insert time, since `diveId` is client-supplied), wrapped by
+`app/actions/bookmarks.ts`'s `"use server"` actions.
+
+The bookmark's "come back here" link is a real URL fragment text directive
+(`#:~:text=…`, `lib/text-fragment.ts`) per the issue's explicit instruction.
+Initially over-built a custom JS highlighter
+(`components/text-fragment-highlight.tsx`, TreeWalker + Range.surroundContents)
+to work around an assumption that WebKit lacks native "Scroll To Text
+Fragment" support -- e2e testing against this project's actual Playwright
+WebKit build disproved that assumption and surfaced the real constraint
+instead: the `:~:` fragment-directive marker is stripped from
+script-visible `location.hash` by any browser that recognizes the syntax,
+even on a bare `page.goto()`, before any page JS runs. That's the spec's own
+design (a page can't read what text a link claimed to highlight), so a
+same-app JS fallback can never observe it in any real browser -- deleted the
+highlighter component and the dead parsing/matching code in
+`lib/text-fragment.ts`, and now just build correct `:~:text=` links and trust
+native browser handling to do the actual scroll+highlight. Docs
+(`docs/development.md`'s new "Bookmarks" section) record why. 156 unit tests,
+99 integration tests (including new ownership-enforcement coverage for
+bookmarks against a real Postgres), all 26 e2e specs (25 pre-existing + new
+`bookmarks.spec.ts`), lint/knip/typecheck/build all green.

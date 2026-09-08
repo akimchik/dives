@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Pencil, Star } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
+import { BookmarkCapture } from "@/components/bookmark-capture";
 import { CreatePadiDiveButton } from "@/components/create-padi-dive-button";
 import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
@@ -229,76 +230,80 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           </Card>
         ) : null}
 
-        <DetailGroup
-          title="Profile"
-          entries={[
-            ["Suunto workout id", dive.suunto_workout_key],
-            ["Max depth", formatMeasurement(dive.max_depth, " m")],
-            ["Average depth", formatMeasurement(dive.avg_depth, " m")],
-            ["Bottom time", formatMinutes(dive.bottom_time_minutes)],
-            ["Water temp — surface", formatMeasurement(dive.water_temp, " °C")],
-            ["Water temp — lowest", formatMeasurement(dive.water_temp_low, " °C")],
-            ["Visibility", formatMeasurement(dive.visibility, " m")],
-            ["Entry type", dive.entry_type],
-          ]}
-        />
+        <BookmarkCapture diveId={dive.id} containerId="dive-bookmark-scope" />
 
-        <DetailGroup
-          title="Gear & gas"
-          entries={[
-            ["Gas mix", dive.gas_mix],
-            ["Cylinder", dive.tank_info],
-            ["Cylinder size", formatMeasurement(dive.cylinder_size, " L")],
-            ["Start pressure", formatMeasurement(dive.start_pressure, " bar")],
-            ["End pressure", formatMeasurement(dive.end_pressure, " bar")],
-            [
-              "Gas used",
-              gasConsumption
-                ? `${gasConsumption.gasUsedLiters.toFixed(0)} L / ${gasConsumption.startLiters.toFixed(0)} L`
-                : null,
-            ],
-            [
-              "SAC rate",
-              gasConsumption ? (
-                <SacRateDisplay
-                  sacRateLitersPerMin={gasConsumption.sacRateLitersPerMin}
-                  deltaPercent={sacDeltaPercent}
-                />
-              ) : null,
-            ],
-            ["Weight", formatMeasurement(dive.weight, " kg")],
-            ["Weighting", dive.weight_feedback],
-            ["Suit", dive.suit_type],
-            ["Also worn", wornExtras(dive)],
-          ]}
-        />
+        <div id="dive-bookmark-scope" className="flex flex-col gap-6">
+          <DetailGroup
+            title="Profile"
+            entries={[
+              ["Suunto workout id", dive.suunto_workout_key],
+              ["Max depth", formatMeasurement(dive.max_depth, " m")],
+              ["Average depth", formatMeasurement(dive.avg_depth, " m")],
+              ["Bottom time", formatMinutes(dive.bottom_time_minutes)],
+              ["Water temp — surface", formatMeasurement(dive.water_temp, " °C")],
+              ["Water temp — lowest", formatMeasurement(dive.water_temp_low, " °C")],
+              ["Visibility", formatMeasurement(dive.visibility, " m")],
+              ["Entry type", dive.entry_type],
+            ]}
+          />
 
-        <DetailGroup
-          title="Conditions & company"
-          entries={[
-            ["Current", dive.current],
-            ["Surge", dive.surge],
-            ["Waves", dive.waves],
-            ["Weather", dive.weather],
-            ["Air temp", formatMeasurement(dive.air_temp, " °C")],
-            ["Water type", dive.water_type],
-            ["Body of water", dive.body_of_water],
-            ["Buddy / dive guide", dive.buddy],
-            ["Dive shop", dive.dive_shop],
-            ["Site coordinates", coordinates],
-          ]}
-        />
+          <DetailGroup
+            title="Gear & gas"
+            entries={[
+              ["Gas mix", dive.gas_mix],
+              ["Cylinder", dive.tank_info],
+              ["Cylinder size", formatMeasurement(dive.cylinder_size, " L")],
+              ["Start pressure", formatMeasurement(dive.start_pressure, " bar")],
+              ["End pressure", formatMeasurement(dive.end_pressure, " bar")],
+              [
+                "Gas used",
+                gasConsumption
+                  ? `${gasConsumption.gasUsedLiters.toFixed(0)} L / ${gasConsumption.startLiters.toFixed(0)} L`
+                  : null,
+              ],
+              [
+                "SAC rate",
+                gasConsumption ? (
+                  <SacRateDisplay
+                    sacRateLitersPerMin={gasConsumption.sacRateLitersPerMin}
+                    deltaPercent={sacDeltaPercent}
+                  />
+                ) : null,
+              ],
+              ["Weight", formatMeasurement(dive.weight, " kg")],
+              ["Weighting", dive.weight_feedback],
+              ["Suit", dive.suit_type],
+              ["Also worn", wornExtras(dive)],
+            ]}
+          />
 
-        {dive.notes ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Notes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{dive.notes}</p>
-            </CardContent>
-          </Card>
-        ) : null}
+          <DetailGroup
+            title="Conditions & company"
+            entries={[
+              ["Current", dive.current],
+              ["Surge", dive.surge],
+              ["Waves", dive.waves],
+              ["Weather", dive.weather],
+              ["Air temp", formatMeasurement(dive.air_temp, " °C")],
+              ["Water type", dive.water_type],
+              ["Body of water", dive.body_of_water],
+              ["Buddy / dive guide", dive.buddy],
+              ["Dive shop", dive.dive_shop],
+              ["Site coordinates", coordinates],
+            ]}
+          />
+
+          {dive.notes ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{dive.notes}</p>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
 
         {suuntoProfile ? (
           <Card>

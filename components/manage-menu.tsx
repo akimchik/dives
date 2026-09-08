@@ -14,7 +14,10 @@ import {
 
 export function ManageMenu() {
   const pathname = usePathname();
-  const isActive = pathname.startsWith("/dive-sites") || pathname.startsWith("/settings");
+  const isActive =
+    pathname.startsWith("/dive-sites") ||
+    pathname.startsWith("/settings") ||
+    pathname.startsWith("/bookmarks");
 
   return (
     <DropdownMenu>
@@ -27,6 +30,11 @@ export function ManageMenu() {
         <DropdownMenuItem asChild>
           <Link href="/dive-sites" className="no-underline">
             Dive Sites
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/bookmarks" className="no-underline">
+            Bookmarks
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

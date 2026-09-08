@@ -224,24 +224,39 @@ it — content *before* the marker is left alone. `location.hash` therefore
 comes back as `#bookmark-text=<value>` in every browser (verified for both a
 fresh navigation and a `history.pushState`), and `parseBookmarkTextHash`
 reads that segment back out. `components/text-fragment-highlight.tsx`,
-mounted on `/dives/[id]`, does the rest on mount: walks
-`#dive-bookmark-scope`'s text nodes with a `TreeWalker`, locates the
-bookmarked string with `findTextOffset` (exact match first, falling back to
-a whitespace-collapsed match so re-wrapped text still round-trips), wraps
-the matching text node(s) in `<mark>`, and scrolls the first one into view.
-The `:~:text=` half of the URL is left for browsers that *do* implement the
-spec (mainly Chromium) to act on natively, redundantly with this app's own
+mounted on `/dives/[id]`, does the rest on mount: walks each bookmarkable
+container's text nodes with a `TreeWalker`, locates the bookmarked string
+with `findTextOffset` (exact match first, falling back to a
+whitespace-collapsed match so re-wrapped text still round-trips), wraps the
+matching text node(s) in `<mark>`, and scrolls the first one into view. The
+`:~:text=` half of the URL is left for browsers that *do* implement the spec
+(mainly Chromium) to act on natively, redundantly with this app's own
 highlight — harmless, and free upside where it works.
 
 `components/bookmark-capture.tsx`, mounted on the same page, is what makes a
 selection bookmarkable in the first place: a `selectionchange` listener shows
 a floating "Bookmark" button whenever the current selection sits entirely
-inside `#dive-bookmark-scope` (the property `DetailGroup`s + notes card;
-deliberately excludes the map and charts) *and* within a single element
-(`anchorNode.parentElement === focusNode.parentElement`) — a selection
-spanning multiple fields is rejected rather than accepted and silently
-unfindable later, since `findTextOffset` only searches for one contiguous
-run of text. Clicking it opens a naming dialog and calls `createBookmarkAction`.
+inside one of the page's bookmarkable containers *and* within a single
+element (`anchorNode.parentElement === focusNode.parentElement`) — a
+selection spanning multiple fields is rejected rather than accepted and
+silently unfindable later, since `findTextOffset` only searches for one
+contiguous run of text. Clicking it opens a naming dialog and calls
+`createBookmarkAction`.
+
+Both components take a `containerIds: string[]` prop rather than a single
+id: `app/dives/[id]/page.tsx`'s `BOOKMARK_CONTAINER_IDS` lists
+`#dive-bookmark-scope-heading` (the title/subtitle block), `#dive-bookmark-scope`
+(the property `DetailGroup`s + notes card), and `#dive-bookmark-scope-caption`
+(the `<figcaption>` summary line under whichever profile chart is showing,
+e.g. "4249 samples · showing depth (m)" or "… reaching 27m over 60 min") —
+three separate containers because the page's layout puts the action buttons
+between the heading and the property cards, and puts each chart's own SVG
+(excluded on purpose: axis-tick text re-renders differently depending on the
+container's pixel width, so it isn't reliably re-findable later) between the
+property cards and its caption. The site map is in none of them. Passing a
+plain array literal at the call site would re-subscribe both components'
+effects on every render, so `BOOKMARK_CONTAINER_IDS` is hoisted to module
+scope for a stable reference, same as `SAC_COMPARISON_WINDOW` above it.
 
 ### Tags
 

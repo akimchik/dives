@@ -23,13 +23,19 @@ const MIN_SELECTION_LENGTH = 2;
 type FloatingButtonPosition = { top: number; left: number };
 
 /**
- * Watches for text selections made inside #<containerId> (the dive detail page's textual
- * property/notes content -- charts, buttons and the site map are deliberately outside it) and
- * offers to bookmark the selection. Only single-element selections are offered: a bookmark's
- * stored text is later re-found with a plain substring search (lib/text-fragment.ts), which only
- * round-trips cleanly for one contiguous run of text, not an arbitrary multi-field selection.
+ * Watches for text selections made inside any of `containerIds` (the dive detail page's textual
+ * content -- the title/subtitle heading and the property/notes cards are two separate containers
+ * since layout puts the action buttons between them in the DOM; charts and the site map are
+ * deliberately in neither) and offers to bookmark the selection. Only single-element selections
+ * are offered: a bookmark's stored text is later re-found with a plain substring search
+ * (lib/text-fragment.ts), which only round-trips cleanly for one contiguous run of text, not an
+ * arbitrary multi-field selection.
+ *
+ * `containerIds` is a dependency of the selectionchange listener's effect, so pass a
+ * module-level/memoized array rather than an inline literal -- otherwise the listener would tear
+ * down and re-attach on every render.
  */
-export function BookmarkCapture({ diveId, containerId }: { diveId: number; containerId: string }) {
+export function BookmarkCapture({ diveId, containerIds }: { diveId: number; containerIds: string[] }) {
   const [buttonPosition, setButtonPosition] = useState<FloatingButtonPosition | null>(null);
   const [selectedText, setSelectedText] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -49,17 +55,18 @@ export function BookmarkCapture({ diveId, containerId }: { diveId: number; conta
         return;
       }
 
-      const container = document.getElementById(containerId);
       const range = selection.getRangeAt(0);
       const anchor = selection.anchorNode;
       const focus = selection.focusNode;
 
-      const withinContainer =
-        container !== null && anchor !== null && focus !== null &&
-        container.contains(anchor) && container.contains(focus);
+      const withinAnyContainer = containerIds.some((id) => {
+        const container = document.getElementById(id);
+        return container !== null && anchor !== null && focus !== null &&
+          container.contains(anchor) && container.contains(focus);
+      });
       const sameElement = anchor?.parentElement !== undefined && anchor?.parentElement === focus?.parentElement;
 
-      if (!withinContainer || !sameElement) {
+      if (!withinAnyContainer || !sameElement) {
         setButtonPosition(null);
         setSelectedText("");
         return;
@@ -78,7 +85,7 @@ export function BookmarkCapture({ diveId, containerId }: { diveId: number; conta
 
     document.addEventListener("selectionchange", handleSelectionChange);
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
-  }, [containerId, isDialogOpen]);
+  }, [containerIds, isDialogOpen]);
 
   function openDialog() {
     setName(selectedText.slice(0, MAX_BOOKMARK_NAME_LENGTH));

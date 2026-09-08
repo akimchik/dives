@@ -6,28 +6,33 @@ import { findTextOffset, parseBookmarkTextHash } from "@/lib/text-fragment";
 
 /**
  * On mount, looks for a `#bookmark-text=` segment in the current URL (as produced by
- * lib/text-fragment.ts's buildTextFragmentHash) and, if the text is found inside
- * #<containerId>, wraps it in a <mark> and scrolls it into view. This is the app's OWN
+ * lib/text-fragment.ts's buildTextFragmentHash) and, if the text is found inside any of
+ * `containerIds`, wraps it in a <mark> and scrolls it into view. This is the app's OWN
  * highlight, independent of the browser's native Scroll-To-Text-Fragment handling of the
  * accompanying `:~:text=` segment: see lib/text-fragment.ts's file comment for why relying on
  * that alone doesn't work in practice (WebKit/Safari discard the directive without ever
  * highlighting anything).
+ *
+ * `containerIds` is a dependency of the mount effect, so pass a module-level/memoized array
+ * rather than an inline literal.
  */
-export function TextFragmentHighlight({ containerId }: { containerId: string }) {
+export function TextFragmentHighlight({ containerIds }: { containerIds: string[] }) {
   useEffect(() => {
     const needle = parseBookmarkTextHash(window.location.hash);
     if (!needle) return;
 
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
     // React (dev/StrictMode) can invoke this effect twice for one mount; highlightText mutates
     // the DOM (wrapping text nodes in <mark>), which isn't idempotent -- a second run would find
-    // its own previous <mark> and wrap it again. Skip if a highlight is already present.
-    if (container.querySelector('[data-testid="bookmark-highlight"]')) return;
+    // its own previous <mark> and wrap it again. Skip if a highlight is already present anywhere
+    // on the page.
+    if (document.querySelector('[data-testid="bookmark-highlight"]')) return;
 
-    highlightText(container, needle);
-  }, [containerId]);
+    for (const id of containerIds) {
+      const container = document.getElementById(id);
+      if (!container) continue;
+      if (highlightText(container, needle)) break;
+    }
+  }, [containerIds]);
 
   return null;
 }
@@ -50,10 +55,12 @@ function collectTextNodeSpans(root: Element): { spans: TextNodeSpan[]; fullText:
   return { spans, fullText };
 }
 
-function highlightText(container: Element, needle: string) {
+// Returns whether a highlight was actually created, so the caller can fall through to the next
+// candidate container when this one doesn't contain the bookmarked text.
+function highlightText(container: Element, needle: string): boolean {
   const { spans, fullText } = collectTextNodeSpans(container);
   const match = findTextOffset(fullText, needle);
-  if (!match) return;
+  if (!match) return false;
 
   // Each overlapping text node is wrapped independently (rather than trying to wrap the whole
   // match in one <mark>), since a single element can't span across sibling elements' boundaries.
@@ -84,4 +91,5 @@ function highlightText(container: Element, needle: string) {
   }
 
   firstMark?.scrollIntoView({ block: "center", behavior: "smooth" });
+  return firstMark !== null;
 }

@@ -95,7 +95,7 @@ export function DepthProfileChart({
           />
         </AreaChart>
       </ChartContainer>
-      <figcaption className="text-xs text-muted-foreground">
+      <figcaption id="dive-bookmark-scope-caption" className="text-xs text-muted-foreground">
         {points.length} samples · depth in metres against elapsed minutes · reaching {maxDepth}m over{" "}
         {maxTime} min
       </figcaption>

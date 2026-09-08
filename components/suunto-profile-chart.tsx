@@ -194,7 +194,7 @@ export function SuuntoProfileChart({
           ))}
         </AreaChart>
       </ChartContainer>
-      <figcaption className="text-xs text-muted-foreground">
+      <figcaption id="dive-bookmark-scope-caption" className="text-xs text-muted-foreground">
         {points.length} samples · {captionLabel}
       </figcaption>
     </figure>

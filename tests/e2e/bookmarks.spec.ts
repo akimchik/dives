@@ -48,24 +48,39 @@ async function logDiveWithNotes(page: import("@playwright/test").Page, title: st
   return diveId;
 }
 
-async function selectWordInNotes(page: import("@playwright/test").Page, word: string) {
-  await page.evaluate((needle) => {
-    const container = document.getElementById("dive-bookmark-scope");
-    const paragraph = container?.querySelector("p");
-    const textNode = paragraph?.firstChild;
-    if (!textNode || !textNode.textContent) throw new Error("notes text node not found");
+// Selects `needle` inside whichever single text node under `containerSelector` contains it whole
+// -- mirrors what a real drag-select produces (one text node, one parent element), which is what
+// BookmarkCapture's "sameElement" check requires.
+async function selectTextInContainer(
+  page: import("@playwright/test").Page,
+  containerSelector: string,
+  needle: string,
+) {
+  await page.evaluate(
+    ({ containerSelector, needle }) => {
+      const container = document.querySelector(containerSelector);
+      if (!container) throw new Error(`container not found: ${containerSelector}`);
 
-    const start = textNode.textContent.indexOf(needle);
-    if (start === -1) throw new Error("needle not found in notes text");
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent ?? "";
+        const start = text.indexOf(needle);
+        if (start === -1) continue;
 
-    const range = document.createRange();
-    range.setStart(textNode, start);
-    range.setEnd(textNode, start + needle.length);
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + needle.length);
 
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }, word);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return;
+      }
+
+      throw new Error(`"${needle}" not found in any single text node under ${containerSelector}`);
+    },
+    { containerSelector, needle },
+  );
 }
 
 test.describe("dive bookmarks", () => {
@@ -76,7 +91,7 @@ test.describe("dive bookmarks", () => {
     // Scroll down first, as a real user would before selecting text near the bottom of a long
     // dive page -- this is what exposed the position bug above.
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await selectWordInNotes(page, BOOKMARKED_WORD);
+    await selectTextInContainer(page, "#dive-bookmark-scope", BOOKMARKED_WORD);
 
     const bookmarkButton = page.getByTestId("bookmark-selection-button");
     await expect(bookmarkButton).toBeVisible();
@@ -128,5 +143,35 @@ test.describe("dive bookmarks", () => {
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page.getByText("Bookmark deleted.")).toBeVisible();
     await expect(page.getByTestId("bookmark-row")).toHaveCount(0);
+  });
+
+  // Regression coverage for a follow-up to issue #6: the title/subtitle heading and each profile
+  // chart's caption line are separate DOM containers from the property/notes cards (the action
+  // buttons and the chart's own SVG sit between them), so BookmarkCapture/TextFragmentHighlight
+  // take a list of container ids rather than one -- this pins that the heading and the caption are
+  // both actually in that list, not just the properties/notes cards already covered above.
+  test("bookmark button also appears over the title/subtitle heading and a profile chart's caption", async ({
+    page,
+  }) => {
+    await registerViaMagicLink(page, uniqueTestEmail("bookmarks-scope"), PASSWORD);
+    await page.goto("/dives/new");
+    await page.getByLabel("Title").fill("Wreck Explorer Special");
+    await page.getByLabel("Date & time").fill("2026-08-14T09:15");
+    await page.getByLabel("Depth profile").fill("0:00, 0\n3:00, 12.4\n18:00, 27.1\n25:00, 0");
+    await page.getByRole("button", { name: "Log dive" }).click();
+    await page.waitForURL(/\/dives\/\d+$/);
+    await expect(page.getByRole("heading", { name: "Wreck Explorer Special" })).toBeVisible();
+
+    await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");
+    await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();
+
+    // Selecting outside any bookmark-scope container (e.g. the site map or a chart's actual
+    // SVG, neither of which is in BOOKMARK_CONTAINER_IDS) must NOT offer a bookmark button --
+    // collapse the current selection first so the next assertion isn't just seeing a stale button.
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    await expect(page.getByTestId("bookmark-selection-button")).toHaveCount(0);
+
+    await selectTextInContainer(page, "#dive-bookmark-scope-caption", "samples");
+    await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();
   });
 });

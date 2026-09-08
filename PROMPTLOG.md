@@ -896,3 +896,42 @@ fields with no per-keystroke behavior to test (`pressSequentially` stays
 reserved for fields like Title/Tags where real key events matter) --
 functionally identical for a plain onChange-controlled textarea, and cut the
 test's local runtime from ~15-19s to ~3s. Full 26-spec e2e suite green.
+
+## 2026-09-08 13:58 - Follow-up: title/subtitle and Suunto Profile text not bookmarkable
+
+> Why bookmarks button does not appear on title and subtitle of the dive and also on Suunto Profile panel -- none of the texts there?
+
+This was intentional scoping (BookmarkCapture only watched inside
+`#dive-bookmark-scope`, the DetailGroup+notes cards), not a bug -- explained
+the design and asked whether to widen it. User confirmed they want the
+title/subtitle bookmarkable, and separately flagged that a chart's own
+caption line (e.g. "4249 samples · showing depth (m)", "... over 60 min") is
+also worth bookmarking, while the chart's actual SVG (axis ticks, data
+points) is not -- those re-render differently depending on the container's
+pixel width, so a bookmark pointing at one wouldn't reliably be re-findable
+on a later visit at a different window size.
+
+`components/bookmark-capture.tsx` and `components/text-fragment-highlight.tsx`
+now take `containerIds: string[]` instead of a single `containerId`, since
+the page's layout makes it impossible to cover heading + properties + chart
+caption with one contiguous DOM container (the action-buttons row sits
+between the heading and the property cards; each chart's own SVG sits
+between the property cards and its caption). Added
+`id="dive-bookmark-scope-heading"` to the title/subtitle block and
+`id="dive-bookmark-scope-caption"` to both SuuntoProfileChart's and
+DepthProfileChart's `<figcaption>` (safe to share one id: only one of the two
+chart cards ever renders on a given dive page). `app/dives/[id]/page.tsx`'s
+new `BOOKMARK_CONTAINER_IDS` module constant lists all three container ids
+that both components now search/watch, hoisted to module scope so its
+reference stays stable across renders (an inline array literal at the call
+site would otherwise tear down and re-attach the selectionchange listener on
+every render). `TextFragmentHighlight` now tries each container in turn on
+mount and stops at the first one where the bookmarked text is actually
+found. Refactored the e2e spec's `selectWordInNotes` into a general
+`selectTextInContainer(page, selector, needle)` and added a new test
+covering both new containers (heading `<h1>` and a depth-profile chart's
+caption) plus a check that a selection outside every bookmarkable container
+still shows no button. 160 unit tests, 98/99 integration tests (1 pre-existing
+flaky concurrent-claim test in notification-queue.test.mjs, unrelated to this
+change and passing in isolation), all 27 e2e specs, lint/knip/typecheck/build
+all green.

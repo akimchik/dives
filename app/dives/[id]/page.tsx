@@ -85,6 +85,18 @@ function toNumber(value: string | null): number | null {
 // How many chronologically-preceding dives the SAC rate comparison averages over (issue #23).
 const SAC_COMPARISON_WINDOW = 5;
 
+// Every element id that BookmarkCapture/TextFragmentHighlight treat as bookmarkable content on
+// this page: the title/subtitle heading, the property/notes cards, and the profile chart's
+// caption (its actual SVG chart is excluded -- axis ticks re-render differently depending on the
+// container's pixel width, so bookmarking one isn't reliably re-findable later). A module-level
+// constant so its identity is stable across renders, same reason as SAC_COMPARISON_WINDOW being
+// hoisted out of the component.
+const BOOKMARK_CONTAINER_IDS = [
+  "dive-bookmark-scope-heading",
+  "dive-bookmark-scope",
+  "dive-bookmark-scope-caption",
+];
+
 function SacRateDisplay({ sacRateLitersPerMin, deltaPercent }: { sacRateLitersPerMin: number; deltaPercent: number | null }) {
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
@@ -164,7 +176,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
     <AppShell email={user.email}>
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
+          <div id="dive-bookmark-scope-heading" className="flex flex-col gap-1">
             <Link
               href="/dives"
               className="flex w-fit items-center gap-1 text-xs text-muted-foreground no-underline hover:text-foreground"
@@ -231,8 +243,8 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
           </Card>
         ) : null}
 
-        <BookmarkCapture diveId={dive.id} containerId="dive-bookmark-scope" />
-        <TextFragmentHighlight containerId="dive-bookmark-scope" />
+        <BookmarkCapture diveId={dive.id} containerIds={BOOKMARK_CONTAINER_IDS} />
+        <TextFragmentHighlight containerIds={BOOKMARK_CONTAINER_IDS} />
 
         <div id="dive-bookmark-scope" className="flex flex-col gap-6">
           <DetailGroup

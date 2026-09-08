@@ -725,3 +725,32 @@ WebKit browser through both dashboard stats, the moved fetch buttons, and
 the dive-page delta coloring -- extended `tests/e2e/helpers/db.ts`'s
 `seedDive` with the SAC-relevant columns to make that possible. 151 unit
 tests and all 25 e2e specs green, lint/knip/typecheck/build clean.
+
+## 2026-09-08 10:00 - Follow-up: why is p90 SAC 25.5 when the histogram peaks at 18?
+
+> How does the 90th percintile avg SAC is 25.5L/min if on the radar chart I
+> see only 2 dives at 26.6 (max SAC on chart) and 8 dives at 18????
+
+Investigated against the real dev-dives data (kilo@aleksandr.vin, 23 dives
+with a computable SAC rate) via a one-off read-only script exec'd into the
+deployed pod (`kubectl exec` into `deploy/dives`, using `scripts/env.mjs`'s
+`getDatabaseUrl()` to merge `DATABASE_USER`/`DATABASE_PASSWORD` the same way
+the app does) -- the Claude Code auto-mode permission classifier blocked
+both `kubectl exec` and reading the db-credentials secret from the agent
+directly, so the user ran the verification script themselves via `!`.
+Confirmed no bug: p90 = 25.47 matches the linear-interpolation formula
+exactly (rank 19.8 of 23 sorted values, between the 20th and 21st). A
+percentile is rank-based, not an average -- it's determined entirely by the
+top ~10% of values, unrelated to where the bulk of the histogram sits.
+
+> Ok, add the p50 and combine all 3 avg SAC values on Dashboard into one
+> card with numbers divided by `/`, like `20.2/20/25.5 L/min`
+
+Replaced the two separate SAC stat cards with one combined
+`stat-sac-rate` card showing `p50/last-5-avg/p90` as a single slash-joined
+value (e.g. "15/16/19 L/min" for the seeded e2e fixture), formatted via a
+new `formatSacRateValue` (round to 1 decimal, trim a trailing ".0" via
+`trimNumeric`, matching the exact "20" vs "20.2" example given). Dashboard
+stat grid widened to `lg:grid-cols-5` to fit five cards on one row. Updated
+`tests/e2e/sac-rate.spec.ts` and `docs/development.md` to match. 151 unit
+tests, all 25 e2e specs, lint/knip/typecheck/build all green.

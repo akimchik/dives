@@ -39,10 +39,10 @@ test("dashboard SAC stats, dive-page SAC comparison, and Logbook-relocated fetch
 
   await page.goto("/dashboard");
 
-  // Last 5 dives (SAC 20, 18, 16, 14, 12) average to 16.0; the Fetch buttons no longer live here.
-  await expect(page.getByTestId("stat-avg-sac-rate")).toHaveText("16.0");
-  // 90th percentile of all six (10..20 step 2), linear-interpolated, is 19.0.
-  await expect(page.getByTestId("stat-sac-rate-90th-percentile")).toHaveText("19.0");
+  // One combined "p50 / last 5 avg / p90" stat over all six dives (SAC 10, 12, 14, 16, 18, 20):
+  // median (linear-interpolated between 14 and 16) is 15; last-5 average (20,18,16,14,12) is 16;
+  // 90th percentile (interpolated between 18 and 20) is 19. The Fetch buttons no longer live here.
+  await expect(page.getByTestId("stat-sac-rate")).toHaveText("15/16/19");
   await expect(page.getByRole("link", { name: "Connect PADI" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Connect Suunto" })).toHaveCount(0);
 

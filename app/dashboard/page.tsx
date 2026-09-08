@@ -53,6 +53,13 @@ function maxCalendarYears(earliestDive: Date | null, today: Date): number {
   return Math.min(MAX_CALENDAR_YEARS, Math.max(1, years));
 }
 
+// Rounds to 1 decimal like every other measurement here, then drops a trailing ".0" (trimNumeric)
+// so a whole-number rate reads as "20", not "20.0", inside the slash-joined summary below.
+function formatSacRateValue(value: number | null): string {
+  if (value === null) return "—";
+  return trimNumeric(Number(value.toFixed(1))) ?? "—";
+}
+
 export const metadata: Metadata = {
   title: "Dashboard · Dives",
 };
@@ -100,13 +107,19 @@ export default async function DashboardPage() {
   ]);
   const recent = dives.slice(0, 5);
   const radarStats = buildDiveRadarStats(dives);
+  const allSacRates = dives.map(diveSacRate).filter((rate): rate is number => rate !== null);
+  const sacRateP50 = percentile(allSacRates, 50);
   const avgSacRateLast5 = average(
     recent.map(diveSacRate).filter((rate): rate is number => rate !== null),
   );
-  const sacRate90thPercentile = percentile(
-    dives.map(diveSacRate).filter((rate): rate is number => rate !== null),
-    90,
-  );
+  const sacRateP90 = percentile(allSacRates, 90);
+  // Order matches how they read left-to-right: typical (median), recent (last 5), worst-case tail
+  // (90th percentile) -- see PROMPTLOG.md for why a raw average alone was misleading.
+  const sacRateSummaryValues = [sacRateP50, avgSacRateLast5, sacRateP90];
+  const sacRateSummary = sacRateSummaryValues.every((value) => value === null)
+    ? "—"
+    : sacRateSummaryValues.map(formatSacRateValue).join("/");
+  const sacRateSummaryUnit = sacRateSummaryValues.some((value) => value !== null) ? "L/min" : undefined;
   const maxYears = maxCalendarYears(earliestDive, new Date());
   const connections = {
     padiConnected: padiIntegration?.status === "connected",
@@ -129,7 +142,7 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Stat
             icon={Waves}
             label="Total dives"
@@ -157,17 +170,10 @@ export default async function DashboardPage() {
           />
           <Stat
             icon={Wind}
-            label="Avg SAC rate (last 5)"
-            value={avgSacRateLast5 === null ? "—" : avgSacRateLast5.toFixed(1)}
-            unit={avgSacRateLast5 === null ? undefined : "L/min"}
-            testId="stat-avg-sac-rate"
-          />
-          <Stat
-            icon={Wind}
-            label="SAC rate (90th pct, all-time)"
-            value={sacRate90thPercentile === null ? "—" : sacRate90thPercentile.toFixed(1)}
-            unit={sacRate90thPercentile === null ? undefined : "L/min"}
-            testId="stat-sac-rate-90th-percentile"
+            label="SAC rate (p50 / last 5 / p90)"
+            value={sacRateSummary}
+            unit={sacRateSummaryUnit}
+            testId="stat-sac-rate"
           />
         </div>
 

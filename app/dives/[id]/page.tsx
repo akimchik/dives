@@ -10,6 +10,7 @@ import { DeleteDiveButton } from "@/components/delete-dive-button";
 import { DepthProfileChart } from "@/components/depth-profile-chart";
 import { DiveSiteMap } from "@/components/dive-site-map-lazy";
 import { SuuntoProfileChart } from "@/components/suunto-profile-chart";
+import { TextFragmentHighlight } from "@/components/text-fragment-highlight";
 import { UpdatePadiDiveButton } from "@/components/update-padi-dive-button";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -231,6 +232,7 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
         ) : null}
 
         <BookmarkCapture diveId={dive.id} containerId="dive-bookmark-scope" />
+        <TextFragmentHighlight containerId="dive-bookmark-scope" />
 
         <div id="dive-bookmark-scope" className="flex flex-col gap-6">
           <DetailGroup

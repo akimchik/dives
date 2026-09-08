@@ -4,21 +4,17 @@ import { registerViaMagicLink } from "./helpers/auth";
 import { uniqueTestEmail } from "./helpers/db";
 
 // End-to-end coverage for issue #6: selecting a piece of a dive's notes, bookmarking it, and
-// jumping back to it from /bookmarks. The selection itself is made via a scripted Range/Selection
-// (page.evaluate) rather than a mouse drag or double-click: a real drag would still land on the
-// same selectionchange-driven code path the app runs in production, but is inherently
-// word-boundary-dependent and flaky to aim precisely, where BookmarkCapture's selectionchange
-// listener is exactly what's under test here, not the mouse.
+// jumping back to it -- highlighted -- from /bookmarks. The selection itself is made via a
+// scripted Range/Selection (page.evaluate) rather than a mouse drag or double-click: a real drag
+// would still land on the same selectionchange-driven code path the app runs in production, but
+// is inherently word-boundary-dependent and flaky to aim precisely, where BookmarkCapture's
+// selectionchange listener is exactly what's under test here, not the mouse.
 //
-// The actual highlight-and-scroll on the destination page is NOT asserted here: it's the
-// browser's own native "Scroll To Text Fragment" handling of the `#:~:text=` URL
-// (lib/text-fragment.ts), and browsers that implement it strip the directive from
-// script-visible state (`location.hash`) once applied -- confirmed against this project's own
-// Playwright WebKit build, where even a bare `page.goto()` to such a URL comes back with an
-// empty hash. There is no DOM node or JS-observable signal left behind to assert against; this
-// suite instead asserts the one thing that IS observable end-to-end -- the bookmark link's href
-// is built with the correct `:~:text=` value -- and trusts the browser to do its documented job
-// with it.
+// The highlight itself is this app's own (components/text-fragment-highlight.tsx), not the
+// browser's native "Scroll To Text Fragment" handling of the `:~:text=` half of the URL: real
+// Safari and this project's own Playwright WebKit build both discard that directive without ever
+// highlighting anything (see lib/text-fragment.ts's file comment), so a bookmark-text= fragment
+// segment ahead of it is what this app actually reads back and acts on.
 const PASSWORD = "a-long-enough-password-123";
 const NOTES = "Saw a hawksbill turtle near the coral wall.";
 const BOOKMARKED_WORD = "hawksbill";
@@ -82,11 +78,18 @@ test.describe("dive bookmarks", () => {
     await expect(bookmarkRow).toContainText(BOOKMARKED_WORD);
 
     const bookmarkLink = bookmarkRow.getByTestId("bookmark-link");
-    await expect(bookmarkLink).toHaveAttribute("href", `/dives/${diveId}#:~:text=${BOOKMARKED_WORD}`);
+    await expect(bookmarkLink).toHaveAttribute(
+      "href",
+      `/dives/${diveId}#bookmark-text=${BOOKMARKED_WORD}:~:text=${BOOKMARKED_WORD}`,
+    );
 
     await bookmarkLink.click();
     await page.waitForURL(new RegExp(`/dives/${diveId}`));
     await expect(page.getByRole("heading", { name: "Afternoon reef dive" })).toBeVisible();
+
+    const highlight = page.getByTestId("bookmark-highlight");
+    await expect(highlight).toBeVisible();
+    await expect(highlight).toHaveText(BOOKMARKED_WORD);
 
     // Deleting it from /bookmarks removes it from the list.
     await page.goto("/bookmarks");

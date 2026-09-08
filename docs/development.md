@@ -122,7 +122,7 @@ same dive produce two outbox rows instead of collapsing into one.
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
 | `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, an update-to-PADI action for linked recreational dives marked out-of-sync, its SAC rate colored red/green against the average of the 5 chronologically preceding dives (issue #23), and text-selection bookmarking over its property/notes content (issue #6, see "Bookmarks" below) |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
-| `/bookmarks` | Every bookmark the user has saved, each linking back to its dive with a `#:~:text=` fragment naming the originally-selected text (see "Bookmarks" below) |
+| `/bookmarks` | Every bookmark the user has saved, each linking back to its dive with the originally-selected text highlighted and scrolled into view (see "Bookmarks" below) |
 
 ### Dashboard radar charts
 
@@ -182,8 +182,8 @@ Sites, Bookmarks and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (auto
 over the user's own sites, with inline create), `tags-field.tsx` (the same
 autocomplete-chip pattern for tags), `dive-sites-manager.tsx`,
 `depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx`,
-`delete-dive-button.tsx`, `bookmark-capture.tsx` and `bookmarks-list.tsx`. Every button
-that makes a server call follows `AGENTS.md`'s convention:
+`delete-dive-button.tsx`, `bookmark-capture.tsx`, `text-fragment-highlight.tsx` and
+`bookmarks-list.tsx`. Every button that makes a server call follows `AGENTS.md`'s convention:
 disabled with a spinner for the duration, then a sonner toast on the result.
 
 ### Bookmarks
@@ -201,27 +201,47 @@ way a dive fetched from `getDive()` already would be.
 
 The location back to that text is a [URL fragment text
 directive](https://wicg.github.io/scroll-to-text-fragment/) (`#:~:text=…`),
-built by the one-line `lib/text-fragment.ts`. There is deliberately no
-matching parser on this app's side to read the directive back out and
-highlight it by hand: the `:~:` marker is a *fragment directive*, and every
-browser that recognizes the syntax strips it from script-visible state
-(`location.hash`) once applied, before any page JS runs — confirmed against
-this project's own Playwright WebKit build, where even a bare `page.goto()`
-to a `:~:text=` URL comes back with an empty hash. That's the spec's own
-design (a page must not be able to read what text a link claimed to
-highlight), so the browser's own native handling is the only thing that ever
-acts on it — where a browser doesn't implement the spec, the link still
-navigates correctly, it just doesn't scroll/highlight on its own.
+built by `lib/text-fragment.ts`'s `buildTextFragmentHash`. A first cut relied
+on the browser's own native "Scroll To Text Fragment" handling of that
+directive and shipped with no matching parser on this app's side — reasoning
+that the `:~:` marker is a *fragment directive* which any browser recognizing
+the syntax strips from script-visible state (`location.hash`) before page JS
+runs, so this app's own JS could never read it back out anyway. That much is
+true (confirmed against this project's Playwright WebKit build: even a bare
+`page.goto()` to a `:~:text=` URL comes back with an empty hash), but it
+missed a second fact: **stripping the directive and implementing the
+highlight are two different things**, and real Safari (and this project's
+WebKit build) do the former without ever doing the latter — a live bookmark
+link on Safari just reloaded the dive page with nothing highlighted (caught
+in prod). So the URL doubles up:
 
-`components/bookmark-capture.tsx`, mounted on `/dives/[id]`, is what makes a
+```
+#bookmark-text=<value>:~:text=<value>
+```
+
+Per the same stripping rule, a browser only removes `:~:` and what follows
+it — content *before* the marker is left alone. `location.hash` therefore
+comes back as `#bookmark-text=<value>` in every browser (verified for both a
+fresh navigation and a `history.pushState`), and `parseBookmarkTextHash`
+reads that segment back out. `components/text-fragment-highlight.tsx`,
+mounted on `/dives/[id]`, does the rest on mount: walks
+`#dive-bookmark-scope`'s text nodes with a `TreeWalker`, locates the
+bookmarked string with `findTextOffset` (exact match first, falling back to
+a whitespace-collapsed match so re-wrapped text still round-trips), wraps
+the matching text node(s) in `<mark>`, and scrolls the first one into view.
+The `:~:text=` half of the URL is left for browsers that *do* implement the
+spec (mainly Chromium) to act on natively, redundantly with this app's own
+highlight — harmless, and free upside where it works.
+
+`components/bookmark-capture.tsx`, mounted on the same page, is what makes a
 selection bookmarkable in the first place: a `selectionchange` listener shows
 a floating "Bookmark" button whenever the current selection sits entirely
 inside `#dive-bookmark-scope` (the property `DetailGroup`s + notes card;
 deliberately excludes the map and charts) *and* within a single element
 (`anchorNode.parentElement === focusNode.parentElement`) — a selection
-spanning multiple fields is rejected rather than accepted and turned into a
-fragment directive nothing can cleanly match. Clicking it opens a naming
-dialog and calls `createBookmarkAction`.
+spanning multiple fields is rejected rather than accepted and silently
+unfindable later, since `findTextOffset` only searches for one contiguous
+run of text. Clicking it opens a naming dialog and calls `createBookmarkAction`.
 
 ### Tags
 

@@ -805,3 +805,39 @@ native browser handling to do the actual scroll+highlight. Docs
 99 integration tests (including new ownership-enforcement coverage for
 bookmarks against a real Postgres), all 26 e2e specs (25 pre-existing + new
 `bookmarks.spec.ts`), lint/knip/typecheck/build all green.
+
+## 2026-09-08 11:22 - Follow-up: bookmark links load the dive page but never highlight anything
+
+> How to bookmark ?
+
+> It doesn't work: when I click on the bookmark, or copy that link and enter in the browser (Kagi and Safari -- same): https://dives.aleksandr.vin/dives/87#:~:text=v4q2ak4ksql -- it reloads into the https://dives.aleksandr.vin/dives/87 and nothing is highlighted
+
+Root cause: the previous commit's design assumption was wrong in a subtle way.
+It correctly established that the `:~:` fragment-directive marker is stripped
+from script-visible `location.hash` by any browser that recognizes the
+syntax (verified against this project's own Playwright WebKit build), but
+wrongly concluded from that alone that native browsers must therefore be
+*doing the highlighting* -- real Safari (and Kagi, also WebKit-based) strip
+the directive and do nothing else with it, so a bare `#:~:text=…` link was a
+complete no-op for this user's actual browsers: reload, no highlight, ever.
+
+Fix: pair the real fragment directive with an ordinary fragment segment
+placed *before* the `:~:` marker -- `#bookmark-text=<value>:~:text=<value>`.
+The stripping rule only removes `:~:` and what follows it, so
+`location.hash` reliably comes back as `#bookmark-text=<value>` in every
+browser (re-verified against Playwright WebKit for both a fresh navigation
+and a client-side `history.pushState`). Brought back
+`components/text-fragment-highlight.tsx` (TreeWalker-based text search +
+`<mark>` wrapping + scrollIntoView, reading the new `bookmark-text=` segment
+via `lib/text-fragment.ts`'s `parseBookmarkTextHash`/`findTextOffset`), which
+this app's own JS now runs unconditionally rather than hoping the browser
+does it. Also fixed a double-highlight bug the first end-to-end test run
+caught: React's dev-mode double-invoked effect re-ran the DOM-mutating
+highlight a second time, nesting a `<mark>` inside the first one -- guarded
+with an early return when the container already has a
+`[data-testid="bookmark-highlight"]` node. The `:~:text=` half of the URL is
+kept for browsers that do implement the spec (mainly Chromium) to act on
+natively, redundant with but harmless alongside this app's own highlight.
+160 unit tests, 99 integration tests, all 26 e2e specs (bookmarks.spec.ts now
+actually asserts the highlighted `<mark>` appears, not just the URL shape),
+lint/knip/typecheck/build all green.

@@ -754,3 +754,20 @@ new `formatSacRateValue` (round to 1 decimal, trim a trailing ".0" via
 stat grid widened to `lg:grid-cols-5` to fit five cards on one row. Updated
 `tests/e2e/sac-rate.spec.ts` and `docs/development.md` to match. 151 unit
 tests, all 25 e2e specs, lint/knip/typecheck/build all green.
+
+## 2026-09-08 10:16 - Split the combined SAC card back apart, drop Deepest dive
+
+> it look too clumsy, split it into 2: avg of last 5 and the rest 2. And
+> remove Deepest dive panel
+
+Split the single `p50/last5/p90` card back into two: `stat-avg-sac-rate`
+("Avg SAC rate (last 5)") and `stat-sac-rate-percentiles` ("SAC rate (p50 /
+p90)", still slash-joined, e.g. "15/19 L/min"). Removed the "Deepest dive"
+tile entirely (and its now-unused `Gauge` icon import) -- the stat grid
+still lands on 5 cards (`lg:grid-cols-5` kept as-is): total dives, total
+bottom time, sites visited, avg SAC (last 5), SAC p50/p90. Updated the two
+`tests/e2e/dives.spec.ts` assertions on the now-removed `stat-deepest-dive`
+testid and `tests/e2e/sac-rate.spec.ts`'s dashboard assertions to match.
+`lib/getDiveStats`'s `deepestDepth` field itself is untouched (still
+computed, just no longer rendered) since other code may still depend on it.
+151 unit tests, all 25 e2e specs, lint/knip/typecheck/build all green.

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Gauge, MapPin, Plus, Tag, Timer, UploadCloud, Waves, Wind } from "lucide-react";
+import { MapPin, Plus, Tag, Timer, UploadCloud, Waves, Wind } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
@@ -113,13 +113,15 @@ export default async function DashboardPage() {
     recent.map(diveSacRate).filter((rate): rate is number => rate !== null),
   );
   const sacRateP90 = percentile(allSacRates, 90);
-  // Order matches how they read left-to-right: typical (median), recent (last 5), worst-case tail
-  // (90th percentile) -- see PROMPTLOG.md for why a raw average alone was misleading.
-  const sacRateSummaryValues = [sacRateP50, avgSacRateLast5, sacRateP90];
-  const sacRateSummary = sacRateSummaryValues.every((value) => value === null)
+  const avgSacRateLast5Display = formatSacRateValue(avgSacRateLast5);
+  const avgSacRateLast5Unit = avgSacRateLast5 === null ? undefined : "L/min";
+  // Typical (median) vs. worst-case tail (90th percentile) -- see PROMPTLOG.md for why a raw
+  // average alone was misleading and the last-5 average now has its own separate card.
+  const sacRatePercentileValues = [sacRateP50, sacRateP90];
+  const sacRatePercentileDisplay = sacRatePercentileValues.every((value) => value === null)
     ? "—"
-    : sacRateSummaryValues.map(formatSacRateValue).join("/");
-  const sacRateSummaryUnit = sacRateSummaryValues.some((value) => value !== null) ? "L/min" : undefined;
+    : sacRatePercentileValues.map(formatSacRateValue).join("/");
+  const sacRatePercentileUnit = sacRatePercentileValues.some((value) => value !== null) ? "L/min" : undefined;
   const maxYears = maxCalendarYears(earliestDive, new Date());
   const connections = {
     padiConnected: padiIntegration?.status === "connected",
@@ -156,13 +158,6 @@ export default async function DashboardPage() {
             testId="stat-total-bottom-time"
           />
           <Stat
-            icon={Gauge}
-            label="Deepest dive"
-            value={trimNumeric(stats.deepestDepth) ?? "—"}
-            unit={stats.deepestDepth === null ? undefined : "m"}
-            testId="stat-deepest-dive"
-          />
-          <Stat
             icon={MapPin}
             label="Sites visited"
             value={String(stats.distinctSites)}
@@ -170,10 +165,17 @@ export default async function DashboardPage() {
           />
           <Stat
             icon={Wind}
-            label="SAC rate (p50 / last 5 / p90)"
-            value={sacRateSummary}
-            unit={sacRateSummaryUnit}
-            testId="stat-sac-rate"
+            label="Avg SAC rate (last 5)"
+            value={avgSacRateLast5Display}
+            unit={avgSacRateLast5Unit}
+            testId="stat-avg-sac-rate"
+          />
+          <Stat
+            icon={Wind}
+            label="SAC rate (p50 / p90)"
+            value={sacRatePercentileDisplay}
+            unit={sacRatePercentileUnit}
+            testId="stat-sac-rate-percentiles"
           />
         </div>
 

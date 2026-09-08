@@ -200,7 +200,6 @@ test.describe("dive logbook", () => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("stat-total-dives")).toHaveText("1");
     await expect(page.getByTestId("stat-total-bottom-time")).toHaveText("48m");
-    await expect(page.getByTestId("stat-deepest-dive")).toHaveText("27.4");
     await expect(page.getByTestId("stat-distinct-sites")).toHaveText("1");
 
     // ------------------------------------------------------------------ edit
@@ -230,7 +229,6 @@ test.describe("dive logbook", () => {
 
     // Stats follow the edit.
     await page.goto("/dashboard");
-    await expect(page.getByTestId("stat-deepest-dive")).toHaveText("31.2");
     await expect(page.getByTestId("stat-total-bottom-time")).toHaveText("52m");
 
     // ---------------------------------------------------------------- delete

@@ -39,10 +39,13 @@ test("dashboard SAC stats, dive-page SAC comparison, and Logbook-relocated fetch
 
   await page.goto("/dashboard");
 
-  // One combined "p50 / last 5 avg / p90" stat over all six dives (SAC 10, 12, 14, 16, 18, 20):
-  // median (linear-interpolated between 14 and 16) is 15; last-5 average (20,18,16,14,12) is 16;
-  // 90th percentile (interpolated between 18 and 20) is 19. The Fetch buttons no longer live here.
-  await expect(page.getByTestId("stat-sac-rate")).toHaveText("15/16/19");
+  // Two SAC stat cards over all six dives (SAC 10, 12, 14, 16, 18, 20): the last-5 average
+  // (20,18,16,14,12) is 16; the p50/p90 pair -- median (interpolated between 14 and 16) is 15,
+  // 90th percentile (interpolated between 18 and 20) is 19. The Fetch buttons no longer live here,
+  // and the old "Deepest dive" tile is gone.
+  await expect(page.getByTestId("stat-avg-sac-rate")).toHaveText("16");
+  await expect(page.getByTestId("stat-sac-rate-percentiles")).toHaveText("15/19");
+  await expect(page.getByTestId("stat-deepest-dive")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Connect PADI" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Connect Suunto" })).toHaveCount(0);
 

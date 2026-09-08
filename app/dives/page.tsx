@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Plus, Star, Tag, UploadCloud, Waves, X } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
+import { FetchSuuntoButton, type SuuntoFetchStatus } from "@/components/fetch-suunto-button";
+import { SyncPadiButton, type PadiSyncStatus } from "@/components/sync-padi-button";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -66,6 +68,8 @@ export default async function DivesPage({
     padiConnected: padiIntegration?.status === "connected",
     suuntoConnected: suuntoIntegration?.status === "connected",
   };
+  const padiSyncStatus: PadiSyncStatus = padiIntegration ? padiIntegration.status : "not_connected";
+  const suuntoFetchStatus: SuuntoFetchStatus = suuntoIntegration ? suuntoIntegration.status : "not_connected";
   const tagCloud = buildTagCloud(dives, connections);
 
   // Dive numbers (#1, #2, ...) count from the oldest dive across the whole logbook, so filtering
@@ -87,9 +91,13 @@ export default async function DivesPage({
                 : `${dives.length} ${dives.length === 1 ? "dive" : "dives"}, most recent first.`}
             </p>
           </div>
-          <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
-            <Plus /> Log a dive
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <SyncPadiButton status={padiSyncStatus} />
+            <FetchSuuntoButton status={suuntoFetchStatus} />
+            <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
+              <Plus /> Log a dive
+            </Link>
+          </div>
         </div>
 
         {tagCloud.length > 0 ? (

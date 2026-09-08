@@ -10,7 +10,7 @@
 
 import { trimNumeric } from "@/lib/dive-format";
 import type { DiveRecord } from "@/lib/dives";
-import { computeGasConsumption } from "@/lib/gas-consumption";
+import { diveSacRate } from "@/lib/sac-rate";
 
 // Distribution bucket sizes. Depth is the issue's own example; duration/visibility/SAC rate were
 // tightened by a follow-up correction (2x/2x/3x finer than their original 10min/5m/5 L-per-min
@@ -144,17 +144,6 @@ function monthlyMinMaxAvgSeries(
   });
 
   return { data, values };
-}
-
-function diveSacRate(dive: DiveRecord): number | null {
-  const result = computeGasConsumption({
-    startPressure: toNumber(dive.start_pressure),
-    endPressure: toNumber(dive.end_pressure),
-    cylinderSize: toNumber(dive.cylinder_size),
-    avgDepth: toNumber(dive.avg_depth),
-    bottomTimeMinutes: dive.bottom_time_minutes,
-  });
-  return result?.sacRateLitersPerMin ?? null;
 }
 
 // Buckets a numeric property into fixed-size steps (e.g. depth in 5m steps: "0", "5", "10", ...),

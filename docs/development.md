@@ -117,10 +117,10 @@ same dive produce two outbox rows instead of collapsing into one.
 
 | Route | What it renders |
 | --- | --- |
-| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + connected integration fetch buttons for PADI/Suunto + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + two collapsible radar-chart sections, "Seasonality" and "Distributions" (`components/dive-radar-charts.tsx`, data from `lib/dive-radar-stats.ts`'s `buildDiveRadarStats`, hidden entirely when the user has no dives) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
-| `/dives` | The whole logbook, newest first, with a full tag cloud and `?tag=` filtering (see "Tags" below) |
+| `/dashboard` | `getDiveStats` tiles (total dives, total bottom time, deepest dive, distinct sites) + two SAC-rate tiles, average of the 5 most recent dives and the all-time 90th percentile (`lib/sac-rate.ts`'s `diveSacRate`/`average`/`percentile`, issue #23) + a GitHub-style activity calendar (`components/dive-activity-calendar.tsx`, backed by `getDiveActivityByDay`/`getEarliestDiveDate`) with a year-range selector (1..N years or All, N capped at 10) + two collapsible radar-chart sections, "Seasonality" and "Distributions" (`components/dive-radar-charts.tsx`, data from `lib/dive-radar-stats.ts`'s `buildDiveRadarStats`, hidden entirely when the user has no dives) + a compact tag cloud (top 12 tags, linking into `/dives?tag=…`) + the five most recent dives |
+| `/dives` | The whole logbook, newest first, with a full tag cloud and `?tag=` filtering (see "Tags" below) + the connected integration fetch buttons for PADI/Suunto (moved here from `/dashboard` per issue #21) |
 | `/dive-sites` | All saved dive sites with attached-dive counts, edit buttons, and a two-site merge workflow (`components/dive-sites-manager.tsx`) that lets the user choose the surviving row plus which name/location/coordinates to keep |
-| `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, and an update-to-PADI action for linked recreational dives marked out-of-sync |
+| `/dives/[id]` | One dive in full, with its depth-profile chart, a create-in-PADI action for unlinked dives, an update-to-PADI action for linked recreational dives marked out-of-sync, and its SAC rate colored red/green against the average of the 5 chronologically preceding dives (issue #23) |
 | `/dives/new`, `/dives/[id]/edit` | The dive form (same `components/dive-form.tsx` in both modes) |
 
 ### Dashboard radar charts
@@ -140,9 +140,10 @@ uses the issue's explicit `5min..max+15min` domain instead; depth is
 normalised to exactly the observed max (`exactMax`, a follow-up correction —
 its outer ring reads as "the deepest dive", not as a scale with spare room,
 unlike every other chart here); visibility and SAC rate (computed per dive via
-`lib/gas-consumption.ts`'s `computeGasConsumption`) are three-series
-min/max/avg radars per a follow-up correction; water temp is a two-series
-avg-high/avg-low radar.
+`lib/sac-rate.ts`'s `diveSacRate`, which wraps `lib/gas-consumption.ts`'s
+`computeGasConsumption` and is also shared by the dashboard/dive-page SAC
+stats from issue #23) are three-series min/max/avg radars per a follow-up
+correction; water temp is a two-series avg-high/avg-low radar.
 
 **Distributions** — angle axis = a value range or a value itself, radius = how
 many dives fall in it (a follow-up correction replaced the original single

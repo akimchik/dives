@@ -19,9 +19,10 @@ import {
   formatMeasurement,
   formatMinutes,
 } from "@/lib/dive-format";
-import { getDive } from "@/lib/dives";
+import { getDive, listDives } from "@/lib/dives";
 import { computeGasConsumption } from "@/lib/gas-consumption";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
+import { average, diveSacRate } from "@/lib/sac-rate";
 import { requireUser } from "@/lib/session";
 import { isSuuntoDiveProfile } from "@/lib/suunto/profile";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,7 @@ function DetailGroup({
   entries,
 }: {
   title: string;
-  entries: [label: string, value: string | null][];
+  entries: [label: string, value: React.ReactNode][];
 }) {
   // A group whose every field was left blank is noise, not information -- drop it entirely rather
   // than rendering a card full of em dashes.
@@ -79,6 +80,27 @@ function toNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// How many chronologically-preceding dives the SAC rate comparison averages over (issue #23).
+const SAC_COMPARISON_WINDOW = 5;
+
+function SacRateDisplay({ sacRateLitersPerMin, deltaPercent }: { sacRateLitersPerMin: number; deltaPercent: number | null }) {
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+      {`${sacRateLitersPerMin.toFixed(1)} L/min`}
+      {deltaPercent !== null && deltaPercent !== 0 ? (
+        <span
+          className={cn(
+            "text-xs font-medium",
+            deltaPercent > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400",
+          )}
+        >
+          {`(${deltaPercent > 0 ? "+" : ""}${deltaPercent.toFixed(0)}% vs last ${SAC_COMPARISON_WINDOW})`}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export default async function DiveDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const diveId = Number(id);
@@ -86,8 +108,9 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
 
   if (!Number.isInteger(diveId)) notFound();
 
-  const [dive, padiIntegration] = await Promise.all([
+  const [dive, allDives, padiIntegration] = await Promise.all([
     getDive(user.id, diveId),
+    listDives(user.id),
     getPadiIntegrationStatus(user.id),
   ]);
 
@@ -121,6 +144,19 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
     avgDepth: toNumber(dive.avg_depth),
     bottomTimeMinutes: dive.bottom_time_minutes,
   });
+
+  // allDives is sorted most-recent-first (listDives), so the dives chronologically before this one
+  // are the ones right after its own index -- take the next SAC_COMPARISON_WINDOW of those.
+  const diveIndex = allDives.findIndex((candidate) => candidate.id === dive.id);
+  const previousDives =
+    diveIndex === -1 ? [] : allDives.slice(diveIndex + 1, diveIndex + 1 + SAC_COMPARISON_WINDOW);
+  const avgPreviousSacRate = average(
+    previousDives.map(diveSacRate).filter((rate): rate is number => rate !== null),
+  );
+  const sacDeltaPercent =
+    gasConsumption && avgPreviousSacRate !== null && avgPreviousSacRate > 0
+      ? ((gasConsumption.sacRateLitersPerMin - avgPreviousSacRate) / avgPreviousSacRate) * 100
+      : null;
 
   return (
     <AppShell email={user.email}>
@@ -223,7 +259,12 @@ export default async function DiveDetailPage({ params }: { params: Promise<{ id:
             ],
             [
               "SAC rate",
-              gasConsumption ? `${gasConsumption.sacRateLitersPerMin.toFixed(1)} L/min` : null,
+              gasConsumption ? (
+                <SacRateDisplay
+                  sacRateLitersPerMin={gasConsumption.sacRateLitersPerMin}
+                  deltaPercent={sacDeltaPercent}
+                />
+              ) : null,
             ],
             ["Weight", formatMeasurement(dive.weight, " kg")],
             ["Weighting", dive.weight_feedback],

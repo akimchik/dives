@@ -698,3 +698,30 @@ since pagination has no other natural ceiling. The external contract
 (`{ workouts: [...] }`) is unchanged, so no changes were needed above the
 sidecar. 143 unit tests green (rewrote the all-mode sidecar tests for the
 new pagination shape), lint/knip clean, helm template verified.
+
+## 2026-09-07 23:53 - Autopilot: issues #21 and #23
+
+> /autopilot work on https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/21 and https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/23
+
+Issue #21: "Move 'Fetch PADI/Suunto' buttons to Logbook page" -- moved
+`SyncPadiButton`/`FetchSuuntoButton` from the Dashboard header
+(`app/dashboard/page.tsx`) to the Logbook header (`app/dives/page.tsx`),
+which already fetched the PADI/Suunto integration status it needed for tag
+display.
+
+Issue #23: "Add avg SAC rate to Dashboard and to dive page" -- added
+`lib/sac-rate.ts` (`diveSacRate`, `average`, `percentile`) built on the
+existing `computeGasConsumption` formula, reused by a refactored
+`lib/dive-radar-stats.ts` instead of duplicating the calculation. Dashboard
+now shows "Avg SAC (last 5)" and "SAC (90th pct, all-time)" stat cards. The
+dive detail page now shows the dive's SAC rate next to its percent delta
+from the average of the previous 5 dives, colored red when higher (worse)
+and green when lower (better).
+
+Added `tests/unit/sac-rate.test.ts` (average/percentile edge cases) and a
+new e2e spec `tests/e2e/sac-rate.spec.ts` that seeds six dives with
+hand-computable SAC rates (10/12/14/16/18/20 L/min) and drives a real
+WebKit browser through both dashboard stats, the moved fetch buttons, and
+the dive-page delta coloring -- extended `tests/e2e/helpers/db.ts`'s
+`seedDive` with the SAC-relevant columns to make that possible. 151 unit
+tests and all 25 e2e specs green, lint/knip/typecheck/build clean.

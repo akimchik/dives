@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Gauge, MapPin, Plus, Tag, Timer, UploadCloud, Waves } from "lucide-react";
+import { Gauge, MapPin, Plus, Tag, Timer, UploadCloud, Waves, Wind } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { DiveActivityCalendar } from "@/components/dive-activity-calendar";
 import { DiveRadarCharts } from "@/components/dive-radar-charts";
-import { FetchSuuntoButton, type SuuntoFetchStatus } from "@/components/fetch-suunto-button";
-import { SyncPadiButton, type PadiSyncStatus } from "@/components/sync-padi-button";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +17,7 @@ import {
 import { buildDiveRadarStats } from "@/lib/dive-radar-stats";
 import { getDiveActivityByDay, getDiveStats, getEarliestDiveDate, listDives } from "@/lib/dives";
 import { getPadiIntegrationStatus } from "@/lib/padi/integrations";
+import { average, diveSacRate, percentile } from "@/lib/sac-rate";
 import { requireUser } from "@/lib/session";
 import { getSuuntoIntegrationStatus } from "@/lib/suunto/integrations";
 import { buildTagCloud, effectiveTags, MISSING_PADI_TAG, MISSING_SUUNTO_TAG } from "@/lib/tags";
@@ -101,12 +100,17 @@ export default async function DashboardPage() {
   ]);
   const recent = dives.slice(0, 5);
   const radarStats = buildDiveRadarStats(dives);
+  const avgSacRateLast5 = average(
+    recent.map(diveSacRate).filter((rate): rate is number => rate !== null),
+  );
+  const sacRate90thPercentile = percentile(
+    dives.map(diveSacRate).filter((rate): rate is number => rate !== null),
+    90,
+  );
   const maxYears = maxCalendarYears(earliestDive, new Date());
-  const padiSyncStatus: PadiSyncStatus = padiIntegration ? padiIntegration.status : "not_connected";
-  const suuntoFetchStatus: SuuntoFetchStatus = suuntoIntegration ? suuntoIntegration.status : "not_connected";
   const connections = {
-    padiConnected: padiSyncStatus === "connected",
-    suuntoConnected: suuntoFetchStatus === "connected",
+    padiConnected: padiIntegration?.status === "connected",
+    suuntoConnected: suuntoIntegration?.status === "connected",
   };
   const tagCloud = buildTagCloud(dives, connections).slice(0, MAX_DASHBOARD_TAGS);
 
@@ -119,15 +123,13 @@ export default async function DashboardPage() {
             <p className="text-sm text-muted-foreground">Your logbook at a glance.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <SyncPadiButton status={padiSyncStatus} />
-            <FetchSuuntoButton status={suuntoFetchStatus} />
             <Link href="/dives/new" className={cn(buttonVariants(), "no-underline")}>
               <Plus /> Log a dive
             </Link>
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Stat
             icon={Waves}
             label="Total dives"
@@ -152,6 +154,20 @@ export default async function DashboardPage() {
             label="Sites visited"
             value={String(stats.distinctSites)}
             testId="stat-distinct-sites"
+          />
+          <Stat
+            icon={Wind}
+            label="Avg SAC rate (last 5)"
+            value={avgSacRateLast5 === null ? "—" : avgSacRateLast5.toFixed(1)}
+            unit={avgSacRateLast5 === null ? undefined : "L/min"}
+            testId="stat-avg-sac-rate"
+          />
+          <Stat
+            icon={Wind}
+            label="SAC rate (90th pct, all-time)"
+            value={sacRate90thPercentile === null ? "—" : sacRate90thPercentile.toFixed(1)}
+            unit={sacRate90thPercentile === null ? undefined : "L/min"}
+            testId="stat-sac-rate-90th-percentile"
           />
         </div>
 

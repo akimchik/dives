@@ -108,16 +108,42 @@ export async function seedSuuntoIntegration(email: string): Promise<void> {
  */
 export async function seedDive(
   email: string,
-  fields: { title?: string | null; occurredAt: string; maxDepth?: number | null; notes?: string | null },
+  fields: {
+    title?: string | null;
+    occurredAt: string;
+    maxDepth?: number | null;
+    notes?: string | null;
+    // SAC-rate inputs (issue #23): all four plus bottomTimeMinutes must be set together for
+    // computeGasConsumption to produce a rate, matching lib/gas-consumption.ts's own contract.
+    avgDepth?: number | null;
+    bottomTimeMinutes?: number | null;
+    cylinderSize?: number | null;
+    startPressure?: number | null;
+    endPressure?: number | null;
+  },
 ): Promise<{ diveId: number }> {
   const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
   if (user.rows.length === 0) throw new Error(`no user found for email ${email}`);
 
   const result = await pool.query<{ id: number }>(
-    `insert into dives (user_id, title, occurred_at, max_depth, notes)
-     values ($1, $2, $3, $4, $5)
+    `insert into dives (
+       user_id, title, occurred_at, max_depth, notes,
+       avg_depth, bottom_time_minutes, cylinder_size, start_pressure, end_pressure
+     )
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      returning id`,
-    [user.rows[0].id, fields.title ?? null, fields.occurredAt, fields.maxDepth ?? null, fields.notes ?? null],
+    [
+      user.rows[0].id,
+      fields.title ?? null,
+      fields.occurredAt,
+      fields.maxDepth ?? null,
+      fields.notes ?? null,
+      fields.avgDepth ?? null,
+      fields.bottomTimeMinutes ?? null,
+      fields.cylinderSize ?? null,
+      fields.startPressure ?? null,
+      fields.endPressure ?? null,
+    ],
   );
 
   return { diveId: result.rows[0].id };

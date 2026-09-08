@@ -34,8 +34,18 @@ export function CreatePadiDiveButton({
 }) {
   const router = useRouter();
   const [isCreating, startCreateTransition] = useTransition();
-  const [isPromptBusy, startPromptTransition] = useTransition();
+  const [isBackingUp, startBackupTransition] = useTransition();
+  const [isSkipping, startSkipTransition] = useTransition();
   const [promptOpen, setPromptOpen] = useState(false);
+  // Once either choice in the dialog resolves, `needsBackupPrompt` itself may still read stale
+  // (the server prop only refreshes via router.refresh()/navigation) -- this overrides it locally
+  // for the rest of this component's lifetime so a later click can't reopen an already-resolved
+  // prompt, e.g. after Skip's dismissal succeeds but the chained create fails for a reason that
+  // doesn't itself trigger a refresh (validation, already_linked).
+  const [promptResolved, setPromptResolved] = useState(false);
+
+  const isPromptBusy = isBackingUp || isSkipping;
+  const isBusy = isCreating || isPromptBusy;
 
   function runCreate() {
     startCreateTransition(async () => {
@@ -55,7 +65,7 @@ export function CreatePadiDiveButton({
   }
 
   function handleCreateClick() {
-    if (needsBackupPrompt) {
+    if (needsBackupPrompt && !promptResolved) {
       setPromptOpen(true);
       return;
     }
@@ -63,11 +73,14 @@ export function CreatePadiDiveButton({
   }
 
   function handleBackupNow() {
-    startPromptTransition(async () => {
+    startBackupTransition(async () => {
       const result = await backupPadiAction();
 
       if (!result.ok) {
         toast.error(result.error);
+        if (result.reason === "not_connected" || result.reason === "reconnect_required") {
+          router.refresh();
+        }
         return;
       }
 
@@ -77,20 +90,20 @@ export function CreatePadiDiveButton({
           ? `Backed up ${result.count} PADI dive${result.count === 1 ? "" : "s"} (${result.skipped} could not be fetched).`
           : `Backed up ${result.count} PADI dive${result.count === 1 ? "" : "s"}.`,
       );
-      setPromptOpen(false);
-      router.refresh();
-    });
-  }
-
-  function handleSkip() {
-    startPromptTransition(async () => {
-      await dismissPadiBackupPromptAction();
+      setPromptResolved(true);
       setPromptOpen(false);
       runCreate();
     });
   }
 
-  const isBusy = isCreating || isPromptBusy;
+  function handleSkip() {
+    startSkipTransition(async () => {
+      await dismissPadiBackupPromptAction();
+      setPromptResolved(true);
+      setPromptOpen(false);
+      runCreate();
+    });
+  }
 
   return (
     <>
@@ -110,11 +123,11 @@ export function CreatePadiDiveButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isPromptBusy}>Cancel</AlertDialogCancel>
             <Button type="button" variant="outline" disabled={isPromptBusy} onClick={handleSkip}>
-              {isPromptBusy ? <Loader2 className="animate-spin" /> : null}
+              {isSkipping ? <Loader2 className="animate-spin" /> : null}
               Skip and upload
             </Button>
             <Button type="button" disabled={isPromptBusy} onClick={handleBackupNow}>
-              {isPromptBusy ? <Loader2 className="animate-spin" /> : null}
+              {isBackingUp ? <Loader2 className="animate-spin" /> : null}
               Back up now
             </Button>
           </AlertDialogFooter>

@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Integration test against a real Postgres, mirroring tests/integration/padi-sync.test.ts's
 // convention (fake padiClient injected into the real credential-resolution/DB-write path).
-// Covers issue #14: fetchPadiBackup's pagination over the full logbook, its reconnect/not-connected
-// classification (shared with sync via lib/padi/auth.ts), and that a successful backup records
-// backup_done_at exactly once.
+// Covers issue #14: fetchPadiBackup's pagination over the full logbook, its reconnect/not-connected/
+// infrastructure/too_large/in_progress classification (the first three shared with sync via
+// lib/padi/auth.ts), and that a successful, complete (skipped === 0) backup records backup_done_at
+// -- while an incomplete one deliberately does not (see the HIGH-severity fix in backup.ts's git
+// history: marking an incomplete backup done would permanently suppress the pre-upload nudge over a
+// file that isn't actually a full backup).
 import { closeTestPool, getTestPool } from "./helpers/pg";
 
 const TEST_KEY_BASE64 = Buffer.from("2".repeat(32)).toString("base64");
@@ -14,6 +17,7 @@ process.env.PADI_TOKEN_ENCRYPTION_KEY = TEST_KEY_BASE64;
 
 const { encryptSecret } = await import("@/lib/padi/crypto");
 const { fetchPadiBackup } = await import("@/lib/padi/backup");
+const { PadiApiError } = await import("@/lib/padi/client");
 
 type Owner = { id: string; email: string };
 
@@ -129,7 +133,7 @@ describe("fetchPadiBackup", () => {
     expect(calls().pageCalls).toBe(2);
   });
 
-  it("counts a dive whose detail fetch fails as skipped rather than failing the whole backup", async () => {
+  it("counts a dive whose detail fetch fails as skipped rather than failing the whole backup, but does NOT mark the backup done", async () => {
     const owner = await createConnectedOwner();
     const { client } = makeFakeClient([[703001, 703002]], new Set([703002]));
 
@@ -139,6 +143,9 @@ describe("fetchPadiBackup", () => {
     if (!result.ok) throw new Error("unreachable");
     expect(result.count).toBe(1);
     expect(result.skipped).toBe(1);
+    // Regression: an incomplete backup must never suppress CreatePadiDiveButton's pre-upload
+    // nudge -- backup_done_at only gets set once every dive was actually fetched.
+    expect(await backupDoneAt(owner.id)).toBeNull();
   });
 
   it("never touches the local dives table", async () => {
@@ -174,5 +181,117 @@ describe("fetchPadiBackup", () => {
     const result = await fetchPadiBackup(owner, { padiClient: makeFakeClient([]).client });
     expect(result).toEqual({ ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" });
     expect(await backupDoneAt(owner.id)).toBeNull();
+  });
+
+  it("returns reconnect_required when PADI rejects the page listing with a 401", async () => {
+    const owner = await createConnectedOwner();
+    const client = {
+      async fetchLogbookPage() {
+        throw new PadiApiError("PADI request failed with status 401", 401);
+      },
+      async fetchLogbookDetail() {
+        throw new Error("unreachable");
+      },
+    };
+
+    const result = await fetchPadiBackup(owner, { padiClient: client });
+    expect(result).toEqual({ ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" });
+  });
+
+  it("returns reconnect_required when PADI rejects a detail fetch with a 401", async () => {
+    const owner = await createConnectedOwner();
+    const client = {
+      async fetchLogbookPage() {
+        return { data: { logbook_logs: [{ id: 705001 }] } };
+      },
+      async fetchLogbookDetail() {
+        throw new PadiApiError("PADI request failed with status 401", 401);
+      },
+    };
+
+    const result = await fetchPadiBackup(owner, { padiClient: client });
+    expect(result).toEqual({ ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" });
+  });
+
+  it("returns infrastructure when listing the logbook fails for a non-401 reason", async () => {
+    const owner = await createConnectedOwner();
+    const client = {
+      async fetchLogbookPage() {
+        throw new Error("PADI is down");
+      },
+      async fetchLogbookDetail() {
+        throw new Error("unreachable");
+      },
+    };
+
+    const result = await fetchPadiBackup(owner, { padiClient: client });
+    expect(result).toEqual({
+      ok: false,
+      error: "Backup failed while listing your PADI logbook",
+      reason: "infrastructure",
+    });
+  });
+
+  it("returns too_large instead of a partial file once the wall-time budget elapses", async () => {
+    vi.useFakeTimers();
+    try {
+      const owner = await createConnectedOwner();
+      const fullPage = Array.from({ length: 15 }, (_, index) => 706000 + index);
+      let pageCalls = 0;
+      const client = {
+        async fetchLogbookPage() {
+          pageCalls += 1;
+          // First page: a full page (keeps the loop going). Advance the fake clock past the
+          // 120s budget before the loop's own deadline check runs, so the *second* page fetch
+          // never happens -- this proves the budget is honored rather than merely documented.
+          if (pageCalls === 1) {
+            vi.advanceTimersByTime(130_000);
+            return { data: { logbook_logs: fullPage.map((id) => ({ id })) } };
+          }
+          throw new Error("must not fetch a second page once the budget has elapsed");
+        },
+        async fetchLogbookDetail(_bearer: string, _affiliateId: string | number, id: string | number) {
+          return { data: { logbook_logs: [{ id: Number(id) }] } };
+        },
+      };
+
+      const result = await fetchPadiBackup(owner, { padiClient: client });
+      expect(result).toEqual({
+        ok: false,
+        error: "Your PADI logbook is too large to back up in one request. Please try again.",
+        reason: "too_large",
+      });
+      expect(pageCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns in_progress for a concurrent backup instead of duplicating PADI reads", async () => {
+    const owner = await createConnectedOwner();
+    let releaseFirstCall: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstCall = resolve;
+    });
+
+    const slowClient = {
+      async fetchLogbookPage() {
+        await gate;
+        return { data: { logbook_logs: [] } };
+      },
+      async fetchLogbookDetail() {
+        return { data: { logbook_logs: [] } };
+      },
+    };
+
+    const firstCall = fetchPadiBackup(owner, { padiClient: slowClient });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = await fetchPadiBackup(owner, { padiClient: slowClient });
+    expect(second).toEqual({ ok: false, error: "A PADI backup is already running.", reason: "in_progress" });
+
+    releaseFirstCall();
+    const first = await firstCall;
+    expect(first.ok).toBe(true);
   });
 });

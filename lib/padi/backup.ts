@@ -1,6 +1,9 @@
 import "server-only";
 
+import pg from "pg";
+
 import type { DiveOwner } from "@/lib/dives";
+import { getDatabaseUrl } from "@/lib/database-url";
 import { getPadiCredentials, isPadiReconnectRequired } from "./auth";
 import { mapWithConcurrency } from "./concurrency";
 import { fetchLogbookDetail as defaultFetchLogbookDetail, fetchLogbookPage as defaultFetchLogbookPage } from "./client";
@@ -13,6 +16,11 @@ const DETAIL_FETCH_CONCURRENCY = 5;
 // continue" story for a file download, so this budget is generous (vs. sync's 45s) and a budget
 // hit is reported as a real failure (reason: "too_large") rather than a partial result.
 const WALL_TIME_BUDGET_MS = 120_000;
+// Distinct from sync.ts's ADVISORY_LOCK_CLASSID (84271) so the two features' locks never collide.
+// Unlike sync, this is read-only (no correctness reason to serialize), but a user firing multiple
+// concurrent backups would each hold a full logbook in memory for up to WALL_TIME_BUDGET_MS while
+// driving DETAIL_FETCH_CONCURRENCY PADI requests -- the lock caps that to one in flight per user.
+const ADVISORY_LOCK_CLASSID = 84272;
 
 interface PadiBackupClient {
   fetchLogbookPage: typeof defaultFetchLogbookPage;
@@ -29,14 +37,13 @@ export type BackupPadiLogbookResult =
   | {
       ok: false;
       error: string;
-      reason: "not_connected" | "reconnect_required" | "infrastructure" | "too_large";
+      reason: "not_connected" | "reconnect_required" | "infrastructure" | "too_large" | "in_progress";
     };
 
 /**
  * Walks the user's entire PADI logbook (same paging as lib/padi/sync.ts) and returns every raw
  * logbook detail record PADI has for them as one timestamped JSON file, for issue #14's "Backup
- * PADI dives" button. Read-only -- it never touches the local `dives` table -- so unlike
- * syncPadiLogbook it takes no advisory lock; two concurrent backups just duplicate PADI reads.
+ * PADI dives" button. Read-only -- it never touches the local `dives` table.
  *
  * `padiClient` is injectable for tests, mirroring lib/padi/sync.ts's own `padiClient` param.
  */
@@ -48,6 +55,51 @@ export async function fetchPadiBackup(
   if (!credentials.ok) return credentials;
   const { bearerToken, affiliateId } = credentials;
 
+  // Dedicated, single-use client for the advisory lock -- see lib/padi/sync.ts's identical
+  // pattern/comment on why this must not be a pooled connection.
+  const lockClient = new pg.Client({ connectionString: getDatabaseUrl() });
+  await lockClient.connect();
+
+  let lockAcquired = false;
+  try {
+    const lockResult = await lockClient.query<{ pg_try_advisory_lock: boolean }>(
+      "select pg_try_advisory_lock($1::int4, $2::int4)",
+      [ADVISORY_LOCK_CLASSID, Number(owner.id)],
+    );
+    lockAcquired = lockResult.rows[0].pg_try_advisory_lock;
+
+    if (!lockAcquired) {
+      return { ok: false, error: "A PADI backup is already running.", reason: "in_progress" };
+    }
+
+    return await runBackup({ owner, bearerToken, affiliateId, padiClient });
+  } finally {
+    if (lockAcquired) {
+      try {
+        await lockClient.query("select pg_advisory_unlock($1::int4, $2::int4)", [
+          ADVISORY_LOCK_CLASSID,
+          Number(owner.id),
+        ]);
+      } catch {
+        // Best-effort: the connection closes immediately below regardless, which releases the
+        // session-scoped lock either way.
+      }
+    }
+    await lockClient.end();
+  }
+}
+
+async function runBackup({
+  owner,
+  bearerToken,
+  affiliateId,
+  padiClient,
+}: {
+  owner: DiveOwner;
+  bearerToken: string;
+  affiliateId: string;
+  padiClient: PadiBackupClient;
+}): Promise<BackupPadiLogbookResult> {
   const deadline = Date.now() + WALL_TIME_BUDGET_MS;
   const dives: unknown[] = [];
   let skipped = 0;
@@ -118,7 +170,13 @@ export async function fetchPadiBackup(
   };
   const filename = `padi-backup-${exportedAt.toISOString().replace(/[:.]/g, "-")}.json`;
 
-  await markPadiBackupDone(owner.id);
+  // A backup with any skipped dive is incomplete, and marking it done would permanently suppress
+  // CreatePadiDiveButton's pre-upload nudge over a file that isn't actually a full backup -- so
+  // backup_done_at is only ever set once every dive in the logbook was fetched successfully
+  // (skipped === 0 also covers the legitimate "logbook is empty" case: 0 dives, 0 skipped).
+  if (skipped === 0) {
+    await markPadiBackupDone(owner.id);
+  }
 
-  return { ok: true, filename, data: JSON.stringify(payload, null, 2), count: dives.length, skipped };
+  return { ok: true, filename, data: JSON.stringify(payload), count: dives.length, skipped };
 }

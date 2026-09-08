@@ -1,14 +1,10 @@
 import "server-only";
 
-import { getPool, queryRead } from "@/lib/db";
+import { getPool } from "@/lib/db";
 import type { DiveOwner, DiveRecord } from "@/lib/dives";
 import { DiveNotFoundError } from "@/lib/dives";
-import { assertKeyConfigured, decryptSecret, keyFromEnvValue } from "./crypto";
-import {
-  decodeIdTokenClaims,
-  PadiApiError,
-  updateRecreationalLogbookDive as defaultUpdateRecreationalLogbookDive,
-} from "./client";
+import { getPadiCredentials } from "./auth";
+import { PadiApiError, updateRecreationalLogbookDive as defaultUpdateRecreationalLogbookDive } from "./client";
 import { mapDiveToPadiUpdatePayload, padiCreateValidationError } from "./create";
 
 export type UpdatePadiDiveResult =
@@ -31,21 +27,8 @@ type PadiUpdateClient = {
 
 const defaultClient: PadiUpdateClient = { updateRecreationalLogbookDive: defaultUpdateRecreationalLogbookDive };
 
-type PadiIntegrationTokenRow = {
-  id_token_encrypted: string;
-  status: string;
-};
-
 function isRecreationalDive(dive: Pick<DiveRecord, "log_type" | "log_course">): boolean {
   return dive.log_type === "Recreational" && dive.log_course === null;
-}
-
-async function getIntegration(userId: string): Promise<PadiIntegrationTokenRow | null> {
-  const result = await queryRead<PadiIntegrationTokenRow>(
-    "select id_token_encrypted, status from padi_integrations where user_id = $1",
-    [userId],
-  );
-  return result.rows[0] ?? null;
 }
 
 function allAffectedRows(response: unknown): number[] {
@@ -98,28 +81,9 @@ export async function updateDiveInPadi(
     };
   }
 
-  const integration = await getIntegration(owner.id);
-  if (!integration) return { ok: false, error: "PADI is not connected", reason: "not_connected" };
-  if (integration.status !== "connected") {
-    return { ok: false, error: "PADI needs to be reconnected", reason: "reconnect_required" };
-  }
-
-  let bearerToken: string;
-  let affiliateId: string;
-  try {
-    assertKeyConfigured(process.env.PADI_TOKEN_ENCRYPTION_KEY);
-    const key = keyFromEnvValue(process.env.PADI_TOKEN_ENCRYPTION_KEY);
-    const previousKey = process.env.PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS
-      ? keyFromEnvValue(process.env.PADI_TOKEN_ENCRYPTION_KEY_PREVIOUS)
-      : undefined;
-    bearerToken = decryptSecret(integration.id_token_encrypted, key, `${owner.id}:id`, previousKey);
-    const claims = decodeIdTokenClaims(bearerToken);
-    if (!claims.affiliateId) throw new Error("PADI idToken is missing custom:affiliate_id");
-    affiliateId = String(claims.affiliateId);
-  } catch (error) {
-    console.error("PADI update failed to decrypt stored tokens", error);
-    return { ok: false, error: "PADI update is temporarily unavailable", reason: "infrastructure" };
-  }
+  const credentials = await getPadiCredentials(owner.id);
+  if (!credentials.ok) return credentials;
+  const { bearerToken, affiliateId } = credentials;
 
   const payload = mapDiveToPadiUpdatePayload(dive, affiliateId);
   if (!payload) return { ok: false, error: "This dive is not linked to PADI.", reason: "not_linked" };

@@ -1075,3 +1075,43 @@ knip clean, 160/160 unit tests, 108/108 Postgres integration tests, and a
 throwaway Playwright/WebKit smoke spec (since deleted) confirming the
 button, dialog, cancel/skip/dismiss-persistence flows in a real browser
 against 30/30 green e2e specs.
+
+Ran a Phase 4 validation pass (parallel security-reviewer + code-reviewer
+agents against the committed diff) before closing out. security-reviewer:
+LOW risk overall, one Medium (fetchPadiBackup had no concurrency guard,
+unlike sync's advisory lock -- unbounded concurrent backups from one user
+could pile up memory/PADI requests) plus a WebKit note (revokeObjectURL
+called synchronously after click() can race and cancel the download in
+WebKit). code-reviewer: one real HIGH -- if every detail fetch in a page
+failed for a non-401 reason, fetchPadiBackup still returned `ok: true` with
+an empty `dives: []` and called markPadiBackupDone, permanently suppressing
+the pre-upload nudge over a backup that never actually happened -- plus a
+HIGH-confidence UX bug where "Back up now" closed the dialog without ever
+calling createPadiDiveAction, silently dropping the user's original upload,
+and several correctness/duplication follow-ups (create.ts/update.ts still
+had their own copies of the credential-decrypt block auth.ts was extracted
+from; both dialog buttons shared one spinner state so clicking one visually
+spun the other too; the migration didn't match this repo's
+`add column if not exists` convention).
+
+Fixed all of it: fetchPadiBackup now only calls markPadiBackupDone when
+`skipped === 0`, gained sync.ts's advisory-lock pattern under its own
+classid (backup is still read-only w.r.t. `dives`, but the lock now caps
+concurrent PADI reads per user), and download-file.ts defers
+revokeObjectURL to a macrotask. CreatePadiDiveButton's "Back up now" now
+chains into the upload on success (matching "Skip and upload"'s existing
+chain) while a *failed* backup leaves the dialog open instead of silently
+proceeding; split the shared prompt-busy transition into per-button
+isBackingUp/isSkipping state; added a client-side `promptResolved` flag so
+a stale server prop can't reopen an already-resolved prompt after a
+non-refreshing failure. create.ts/update.ts now both call
+lib/padi/auth.ts's getPadiCredentials instead of their own copies.
+Migration now uses `add column if not exists`. Added 6 more
+padi-backup.test.ts cases (401-triggered reconnect_required on both the
+page and detail fetch, non-401 infrastructure on page listing, too_large
+via vi.useFakeTimers()-advanced wall-clock, the new in_progress advisory
+lock under concurrent calls, and skipped>0 no longer setting
+backup_done_at). Re-verified: typecheck/lint/knip clean, 160/160 unit,
+113/113 Postgres integration, `pnpm build` clean, and a second throwaway
+WebKit smoke spec (since deleted) confirming the dialog stays open on a
+failed backup and the resolved-prompt guard holds — 29/29 e2e specs green.

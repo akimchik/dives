@@ -968,3 +968,42 @@ Bumped just that one assertion's timeout to 20s (proportionate against the
 42s the heaviest existing CI-run test step took) rather than raising the
 suite's global default. 27/27 e2e specs, lint/knip/typecheck all green
 locally.
+
+## 2026-09-08 15:34 - Follow-up: 20s timeout still not enough, CI still failing
+
+> Call log:
+>       - Expect "toBeVisible" with timeout 20000ms
+>       - waiting for getByRole('heading', { name: 'Wreck Explorer Special' })
+>
+>     1 failed
+>     [webkit] > tests/e2e/bookmarks.spec.ts:153:7 > dive bookmarks > bookmark button also appears over the title/subtitle heading and a profile chart's caption
+
+The previous commit's 20s timeout bump wasn't a real fix -- it was a guess
+based on incomplete evidence, and doubling down on a bigger number without
+more evidence was next. Pulled the CI logs again (`tea actions runs logs
+438`): the heading still never appeared even after the full 20s wait
+("element(s) not found"), while dives.spec.ts's OWN recharts-based radar
+chart test (running later in the same suite) passed in 4.8s -- proving
+Next dev's recharts/d3 compile does eventually succeed in this CI
+environment, just not within any timeout tried so far for THIS specific
+test. Root-caused it properly this time: this test drove the dive through
+/dives/new's form, and typing a valid profile into that form's textarea
+mounts the form's OWN live-preview chart
+(components/depth-profile-field.tsx's `dynamic()` import) -- a SEPARATE
+webpack chunk from the detail page's statically-imported one. So this one
+test was forcing Next dev to cold-compile the recharts/d3 dependency chain
+TWICE (once for /dives/new, again for /dives/[id]) in immediate succession,
+on a CI runner already shown to be running ordinary steps 4-8x slower than
+local.
+
+Extended `tests/e2e/helpers/db.ts`'s `seedDive` with an optional
+`depthProfile` field (written straight to the `depth_profile` jsonb column,
+mirroring `lib/dives.ts`'s own `JSON.stringify` convention) and rewrote the
+test to seed the dive directly and `page.goto` straight to its detail page,
+cutting the unavoidable compile work in half by skipping the form (and its
+live-preview chart) entirely -- this is also just a better-designed test:
+the scope-check under test never needed a real form submission in the first
+place. Kept a generous 30s timeout on the one remaining compile-dependent
+assertion as a safety margin, now backed by evidence rather than a guess.
+27/27 e2e specs, 99 integration tests, lint/knip/typecheck/build all green
+locally.

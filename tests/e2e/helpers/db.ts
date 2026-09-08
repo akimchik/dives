@@ -120,6 +120,12 @@ export async function seedDive(
     cylinderSize?: number | null;
     startPressure?: number | null;
     endPressure?: number | null;
+    // Seeded directly rather than driven through the dive form's textarea: typing a valid profile
+    // there mounts the form's own live-preview chart (components/depth-profile-field.tsx's
+    // dynamic() import), which -- on top of the detail page's own chart -- doubles the
+    // recharts/d3 chunks a test forces Next dev to cold-compile. Bypassing the form avoids that
+    // extra, unnecessary compile.
+    depthProfile?: { time: number; depth: number }[] | null;
   },
 ): Promise<{ diveId: number }> {
   const user = await pool.query<{ id: number }>("select id from users where email = $1", [email]);
@@ -128,9 +134,9 @@ export async function seedDive(
   const result = await pool.query<{ id: number }>(
     `insert into dives (
        user_id, title, occurred_at, max_depth, notes,
-       avg_depth, bottom_time_minutes, cylinder_size, start_pressure, end_pressure
+       avg_depth, bottom_time_minutes, cylinder_size, start_pressure, end_pressure, depth_profile
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      returning id`,
     [
       user.rows[0].id,
@@ -143,6 +149,7 @@ export async function seedDive(
       fields.cylinderSize ?? null,
       fields.startPressure ?? null,
       fields.endPressure ?? null,
+      fields.depthProfile ? JSON.stringify(fields.depthProfile) : null,
     ],
   );
 

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { registerViaMagicLink } from "./helpers/auth";
-import { uniqueTestEmail } from "./helpers/db";
+import { seedDive, uniqueTestEmail } from "./helpers/db";
 
 // End-to-end coverage for issue #6: selecting a piece of a dive's notes, bookmarking it, and
 // jumping back to it -- highlighted -- from /bookmarks. The selection itself is made via a
@@ -153,20 +153,34 @@ test.describe("dive bookmarks", () => {
   test("bookmark button also appears over the title/subtitle heading and a profile chart's caption", async ({
     page,
   }) => {
-    await registerViaMagicLink(page, uniqueTestEmail("bookmarks-scope"), PASSWORD);
-    await page.goto("/dives/new");
-    await page.getByLabel("Title").fill("Wreck Explorer Special");
-    await page.getByLabel("Date & time").fill("2026-08-14T09:15");
-    await page.getByLabel("Depth profile").fill("0:00, 0\n3:00, 12.4\n18:00, 27.1\n25:00, 0");
-    await page.getByRole("button", { name: "Log dive" }).click();
-    await page.waitForURL(/\/dives\/\d+$/);
-    // A generous timeout here, not the suite's usual 5s default: this is the first e2e spec to
+    const email = uniqueTestEmail("bookmarks-scope");
+    await registerViaMagicLink(page, email, PASSWORD);
+    // Seeded directly rather than driven through /dives/new's form: typing a valid profile into
+    // that form's textarea mounts its OWN live-preview chart (a dynamic() import, separate from
+    // the detail page's static one), so filling it out first forced Next dev to cold-compile the
+    // recharts/d3 chunk twice over -- once for /dives/new, again for /dives/[id] -- which was
+    // consistently fast locally but timed out repeatedly in CI (see PROMPTLOG.md). Seeding skips
+    // straight to the one compile that's actually unavoidable for testing the detail page's own
+    // chart caption.
+    const { diveId } = await seedDive(email, {
+      title: "Wreck Explorer Special",
+      occurredAt: "2026-08-14T09:15:00.000Z",
+      depthProfile: [
+        { time: 0, depth: 0 },
+        { time: 3, depth: 12.4 },
+        { time: 18, depth: 27.1 },
+        { time: 25, depth: 0 },
+      ],
+    });
+
+    await page.goto(`/dives/${diveId}`);
+    // Still a generous timeout, not the suite's usual 5s default: this is the first e2e spec to
     // render a dive with a real depth profile on its detail page, so it's also the first request
     // that forces Next dev's on-demand compiler to bundle DepthProfileChart's recharts/d3 chain --
     // consistently fast locally, but CI's shared runners are measurably slower (see
-    // playwright.config.ts's comment on the CI-only 60s per-test budget) and blew past 5s here.
+    // playwright.config.ts's comment on the CI-only 60s per-test budget).
     await expect(page.getByRole("heading", { name: "Wreck Explorer Special" })).toBeVisible({
-      timeout: 20_000,
+      timeout: 30_000,
     });
 
     await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");

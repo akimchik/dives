@@ -36,7 +36,9 @@ async function logDiveWithNotes(page: import("@playwright/test").Page, title: st
   await page.goto("/dives/new");
   await page.getByLabel("Title").pressSequentially(title);
   await page.getByLabel("Date & time").fill("2026-08-14T09:15");
-  await page.getByLabel("Notes").pressSequentially(NOTES);
+  // fill(), not pressSequentially(): the filler text below is long enough (~2000 chars) that
+  // typing it character-by-character was slow enough to time out on CI's shared runners.
+  await page.getByLabel("Notes").fill(NOTES);
   await page.getByRole("button", { name: "Log dive" }).click();
   await page.waitForURL(/\/dives\/\d+$/);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();

@@ -874,3 +874,25 @@ has). Verified this test fails against the pre-fix code (button at y=467.7
 against a 400px viewport) and passes after the fix, before moving on. 160
 unit tests, 99 integration tests, all 26 e2e specs, lint/knip/typecheck/build
 all green.
+
+## 2026-09-08 13:09 - Follow-up: CI failure at Notes field in bookmarks e2e spec
+
+> ci failed:
+>
+>     > 39 |   await page.getByLabel("Notes").pressSequentially(NOTES);
+>
+> 1 failed
+> 66
+>     [webkit] > tests/e2e/bookmarks.spec.ts:70:7 > dive bookmarks > select text, bookmark it, then jump back to it from /bookmarks
+
+The previous commit's regression test padded the test dive's Notes field with
+~2000 characters of filler to force the page past a shortened 400px test
+viewport, but typed it in via `pressSequentially()` -- real per-character
+keystroke simulation, fine for a few words but slow enough over ~2000 chars
+to time out on CI's slower shared runners even under the suite's 60s CI
+budget (passed locally every time, since local Postgres/dev-server round
+trips are faster). Switched to `.fill()`, this repo's standard for plain text
+fields with no per-keystroke behavior to test (`pressSequentially` stays
+reserved for fields like Title/Tags where real key events matter) --
+functionally identical for a plain onChange-controlled textarea, and cut the
+test's local runtime from ~15-19s to ~3s. Full 26-spec e2e suite green.

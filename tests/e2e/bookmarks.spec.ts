@@ -183,8 +183,16 @@ test.describe("dive bookmarks", () => {
       timeout: 30_000,
     });
 
-    await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");
-    await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();
+    // The heading above is server-rendered HTML and can paint before the page finishes
+    // hydrating -- BookmarkCapture's selectionchange listener only exists once React attaches
+    // it, and a selectionchange fired before then is simply missed (it's edge-triggered, not
+    // polled). Retrying the select-and-check pair via toPass(), rather than a single attempt,
+    // makes this robust to that race on a CI runner where hydrating this same heavy
+    // recharts/d3-dependent page can lag behind its initial paint.
+    await expect(async () => {
+      await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");
+      await expect(page.getByTestId("bookmark-selection-button")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
 
     // Selecting outside any bookmark-scope container (e.g. the site map or a chart's actual
     // SVG, neither of which is in BOOKMARK_CONTAINER_IDS) must NOT offer a bookmark button --
@@ -192,7 +200,9 @@ test.describe("dive bookmarks", () => {
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     await expect(page.getByTestId("bookmark-selection-button")).toHaveCount(0);
 
-    await selectTextInContainer(page, "#dive-bookmark-scope-caption", "samples");
-    await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();
+    await expect(async () => {
+      await selectTextInContainer(page, "#dive-bookmark-scope-caption", "samples");
+      await expect(page.getByTestId("bookmark-selection-button")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
   });
 });

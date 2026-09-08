@@ -1007,3 +1007,35 @@ place. Kept a generous 30s timeout on the one remaining compile-dependent
 assertion as a safety margin, now backed by evidence rather than a guess.
 27/27 e2e specs, 99 integration tests, lint/knip/typecheck/build all green
 locally.
+
+## 2026-09-08 16:14 - Follow-up: heading renders now, but selection-button check still flaky in CI
+
+> Error: expect(locator).toBeVisible() failed
+> Locator: getByTestId('bookmark-selection-button')
+> waiting for getByTestId('bookmark-selection-button')
+>
+>       186 |     await selectTextInContainer(page, "#dive-bookmark-scope-heading h1", "Explorer");
+>     > 187 |     await expect(page.getByTestId("bookmark-selection-button")).toBeVisible();
+
+Pulled the CI logs again (`tea actions runs logs 440`): the previous
+seed-instead-of-form fix worked -- the heading now renders in 7.7s total,
+nowhere near the 30s timeout -- but the *next* step failed instead. Root
+cause this time: the heading is server-rendered HTML and can paint before
+the page finishes hydrating, while `BookmarkCapture`'s `selectionchange`
+listener only exists once React actually attaches it client-side. A
+`selectionchange` event fired (via the test's scripted
+`document.getSelection().addRange(...)`) before that listener attaches is
+simply missed forever -- it's edge-triggered, not polled, so there's no
+later moment it could still catch up. This page happens to also need to
+hydrate the same heavy recharts/d3-dependent chart discussed in the last two
+follow-ups, so on a slow CI runner hydration can measurably lag behind the
+initial paint, whereas the suite's other interactive-element tests
+(clicking/filling ordinary form controls) hydrate fast enough that this race
+never showed up before.
+
+Wrapped both select-then-check steps in `expect(async () => {...}).toPass({
+timeout: 30_000 })`: it retries the whole select-and-check pair (not just
+the check) until the listener is actually live, which fixes the race
+regardless of exactly how long hydration takes on a given CI run, rather
+than tuning yet another guessed timeout number. 27/27 e2e specs,
+lint/knip/typecheck all green locally.

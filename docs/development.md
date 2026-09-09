@@ -178,7 +178,7 @@ indistinguishable.
 
 Shared pieces live in `components/`: `app-shell.tsx` (header + nav, wrapping
 every authenticated screen), `manage-menu.tsx` (the header menu linking to Dive
-Sites, Bookmarks and Integrations), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
+Sites, Bookmarks, Integrations and Settings), `dive-form.tsx`, `dive-site-field.tsx` (autocomplete
 over the user's own sites, with inline create), `tags-field.tsx` (the same
 autocomplete-chip pattern for tags), `dive-sites-manager.tsx`,
 `depth-profile-field.tsx`, `depth-profile-chart.tsx`, `create-padi-dive-button.tsx`,
@@ -461,6 +461,76 @@ one-time nudge dialog — "Back up your PADI logbook first?" — whenever
 proceeds straight to the upload. Either choice permanently suppresses the
 prompt — neither column is ever cleared back to null.
 
+## Dives backup zip (issue #16)
+
+`/settings` (`app/settings/page.tsx`, reached from the header's Manage menu) is
+the app's own settings screen, distinct from `/settings/integrations`, which
+stays where it is and keeps its own menu entry. Its "Backup" card holds
+`components/backup-dives-button.tsx`, which downloads everything the app stores
+for the user's dives as one zip.
+
+Unlike the PADI backup above this is a **route handler**
+(`app/api/backup/dives/route.ts`), not a server action, because the payload is
+binary — a server action would have to base64 the whole zip through the RSC
+stream. The handler uses `getOptionalUser()` + a 401 rather than `requireUser()`
+on purpose: `requireUser` redirects to the login page, and a `fetch()`-driven
+download would follow that redirect and hand the client an HTML page named
+`*.zip`. The user id comes from the session only; nothing about the request
+selects whose data is archived.
+
+`lib/backup/dives-zip.ts`'s `buildDivesBackupZip(userId)` assembles the archive
+with `jszip`:
+
+- `dives.json` — `listDives(userId)`, the same flat snapshot the backup emails use.
+- `dive_sites.json` — `listDiveSites(userId)`.
+- `bookmarks.json` — `listBookmarks(userId)`.
+- `suunto/<diveId>/<path>` — the *raw* Suunto export bundle, unpacked verbatim.
+
+That last part is why `lib/suunto/raw-bundle.ts` grew `extractAllFiles`
+alongside `extractSmlJson`: the app itself only ever needs `workout.sml.json`,
+but a backup that silently dropped the other files in the bundle wouldn't be a
+backup. `extractAllFiles` is async (promisified `zlib.gunzip`) where
+`extractSmlJson` stays sync — the backup decodes many bundles in a row, and
+`gunzipSync` would pin the event loop for the whole batch, stalling every other
+in-flight request behind it.
+
+Bundle blobs are excluded from `snapshotColumns` by design (see "Raw Suunto
+data preview"), so the backup fetches them through `getDiveSuuntoOriginalBundles`
+— the batch sibling of the raw preview page's `getDiveSuuntoOriginalBundle`,
+same ownership contract (`where d.user_id = $1 and d.id = any($2::int[])`, so
+another user's id is simply absent from the returned map). Only dives whose
+`suunto_workout_key` is non-null are asked for.
+
+**What is and isn't bounded** matters here, because it's easy to over-claim.
+`BUNDLE_BATCH_SIZE` (5) bounds how many gzipped blobs one query materializes at
+once, and `BUNDLE_DECODE_CONCURRENCY` (5) bounds how many decode in parallel.
+Neither bounds *total* memory: JSZip holds every added entry until
+`generateAsync()` runs, so the archive grows with the number and size of a
+user's bundles regardless. That's what `MAX_TOTAL_BUNDLE_BYTES` (300 MB) is
+for — decoded bytes are counted as they're added and `BackupTooLargeError` is
+thrown past the ceiling, which the route turns into a `413` with an explicit
+message rather than letting an OOM take the server process down. Chunking the
+fetch is also what lets that check fire *before* the memory is committed rather
+than after. There's still no wall-time budget like PADI's: every read here is a
+local Postgres query, not a third-party API.
+
+A bundle that isn't a real gzipped export (integration tests and older
+placeholder rows store a plain `bundle:<workoutKey>` string) is logged and
+skipped rather than failing the whole backup, matching how
+`scripts/backfill-suunto-gas-rate.ts` steps over them. Entry paths are
+sanitized (no absolute paths, no `..`) and then de-duplicated per dive with a
+numeric suffix — sanitizing is lossy, and `JSZip.file()` silently *replaces* a
+colliding entry, so without that a file would vanish from the backup with no
+error anywhere.
+
+`tests/integration/dives-backup-zip.test.ts` covers all of it against a real
+Postgres, including the rule-10 invariant: a second user's dives, sites,
+bookmarks and bundle bytes must appear nowhere in the first user's archive.
+
+Client-side the blob is saved by `lib/download-file.ts`'s `downloadBlobFile` —
+the binary sibling of `downloadTextFile`, sharing its append/click/remove +
+deferred `URL.revokeObjectURL` dance for the same Firefox/WebKit reasons.
+
 ## Suunto staged imports
 
 Suunto integration is fetch-only and user-triggered. The fetch dialog offers two time ranges. "Recent days" asks for how many recent days to check and the sidecar lists workouts with `suuntool workouts list --since <days>d --limit 100 --format json`. "All time" (issue #24) fetches the user's entire workout history by paginating that *same* bounded, single-page call itself, looping with an increasing `--offset` (`suuntool workouts list --since <since>? --limit 100 --offset <n> --format json`) until a page comes back shorter than the requested 100, rather than relying on suuntool's own `--stream --limit 0` auto-pagination. That auto-pagination was the original implementation and proved fundamentally unreliable for a large real history: a production fetch with ~9,600 activities died with `BAD_ENVELOPE: unexpected end of JSON input` (suuntool exit code 5) first at suuntool's own 30s default HTTP timeout, then again at an explicit 170s `--timeout` override — proving the override only delayed the same failure rather than fixing it, since one continuous multi-minute streaming HTTP operation was never going to reliably finish for a large-enough history no matter how long it was allowed to run. Paginating independently means every individual `suuntool` invocation is exactly as reliable as the already-proven "recent days" call, and a hiccup on one page never loses the pages already collected: if a later page's `suuntool` process exits non-zero with a `server`/`timeout`/`network`-classified reason, whatever's been paginated so far is returned as a salvaged partial listing instead of being discarded — safe because the caller already dedupes against `dives`/`suunto_imports`, so the next click's from-scratch re-pagination just skips everything already staged/saved. The very first page failing, or any auth/usage failure at any offset, still hard-fails with no salvage. `SUUNTOOL_LIST_ALL_TIMEOUT_MS` (180s) now bounds the whole pagination *loop's* wall time (checked between pages, not inside any single `suuntool` call) — if it elapses mid-pagination, whatever's been collected so far is returned rather than erroring, matching the same "click Fetch again to continue" flow. `SUUNTO_SIDECAR_MAX_LIST_ALL_WORKOUTS` (20,000) is a hard cap on accumulated results, since pagination itself has no other natural ceiling the way a single bounded page does. The two modes are separate, type-checked request shapes end to end — `listSuuntoWorkouts(session, { daysBack } | { all: true })` and `fetchSuuntoWorkoutsAction({ mode: "days", daysBack } | { mode: "all" })` — and the action re-validates the `mode` discriminant at runtime too, since Server Action arguments are client-controlled and an unrecognised mode must not fall through to the expensive all-time path. Everything after the listing (dedupe, export, compile, stage) is the same code for both modes.
@@ -598,6 +668,24 @@ refuses to run at all while password auth is off (its normal deployed state).
 
 Playwright is configured to use WebKit (see `AGENTS.md`), starts the Next.js
 dev server automatically, and drives it against the same local Postgres.
+
+## Feedback button (issue #22)
+
+The header's feedback button (`components/feedback-button.tsx`, rendered by
+`components/app-shell.tsx` between the theme toggle and sign-out) opens a
+dialog whose submit calls `submitFeedbackAction`
+(`app/actions/feedback.ts`). That action files a Gitea issue labelled
+`user-feedback` via `lib/gitea/client.ts` and then best-effort emails
+`DIVES_ADMIN_EMAIL` through `sendPlainEmail` — the issue is the durable
+record, so a mail failure is logged but still reports success to the user.
+
+`lib/gitea/client.ts` resolves (and, on first use, creates) the
+`user-feedback` label because Gitea's issue-create endpoint takes numeric
+label ids, not names. It reads `GITEA_TOKEN` (secret, required) plus
+`GITEA_BASE_URL` / `GITEA_OWNER` / `GITEA_REPO` (defaulted in code, see
+`.env.example`); with the token unset — or still set to its Helm placeholder —
+submissions fail with a generic "try again later" toast and a server-side log
+rather than calling out with an empty token.
 
 ## Healthcheck route
 

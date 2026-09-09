@@ -585,6 +585,36 @@ export async function getDiveSuuntoOriginalBundle(
   return { workoutKey: row.suunto_workout_key, originalBundle: row.suunto_original_bundle };
 }
 
+// Batch form of getDiveSuuntoOriginalBundle, for the dives backup zip: same ownership contract
+// (rows of other users simply don't match, so an id that isn't the caller's is absent from the map
+// rather than an error), same exclusion from snapshotColumns. Callers pass ids in bounded chunks --
+// each row carries a whole gzipped export, so "select every bundle at once" would trade N round
+// trips for one unbounded result set.
+export async function getDiveSuuntoOriginalBundles(
+  userId: string,
+  diveIds: number[],
+): Promise<Map<number, { workoutKey: string; originalBundle: Buffer }>> {
+  if (diveIds.length === 0) return new Map();
+
+  const result = await queryRead<{ id: number; suunto_workout_key: string | null; suunto_original_bundle: Buffer | null }>(
+    `
+      select d.id, d.suunto_workout_key, d.suunto_original_bundle
+      from dives d
+      where d.user_id = $1
+        and d.id = any($2::int[])
+    `,
+    [userId, diveIds],
+  );
+
+  const bundles = new Map<number, { workoutKey: string; originalBundle: Buffer }>();
+  for (const row of result.rows) {
+    if (row.suunto_workout_key === null || row.suunto_original_bundle === null) continue;
+    bundles.set(row.id, { workoutKey: row.suunto_workout_key, originalBundle: row.suunto_original_bundle });
+  }
+
+  return bundles;
+}
+
 export async function listSuuntoMergeDiveCandidates(
   userId: string,
   preferredAt: Date | string | null,

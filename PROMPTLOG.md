@@ -1115,3 +1115,68 @@ backup_done_at). Re-verified: typecheck/lint/knip clean, 160/160 unit,
 113/113 Postgres integration, `pnpm build` clean, and a second throwaway
 WebKit smoke spec (since deleted) confirming the dialog stays open on a
 failed backup and the resolved-prompt guard holds — 29/29 e2e specs green.
+
+## 2026-09-09 21:23 — Autopilot: Feedback action (issue #22) + Backup dives (issue #16)
+
+> /autopilot work on issues https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/22 and https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/16
+
+Issue #22: "Add a Feedback button between dark mode and signout buttons. It
+should collect a feedback message and register a new issue in gitea with
+'user-feedback' label + send an email to admin."
+
+Issue #16: "Add menu for Settings. Add there Backup dives button. It should
+download a one zip file with all the data stored for user's dives (including
+Suunto bundles too)."
+
+Ran the two features as parallel executor agents (no shared files, so no
+worktree isolation needed) followed by a Phase 4 validation pass (parallel
+security-reviewer + code-reviewer against the combined diff).
+
+Feedback (#22): new `lib/gitea/client.ts` (plain fetch + AbortController,
+resolves/creates the `user-feedback` label by id since Gitea's issue-create
+endpoint takes label ids not names, placeholder-token detection so an
+undeployed Helm chart reads as "not configured" rather than firing a bad
+token), `app/actions/feedback.ts` server action, `components/feedback-button.tsx`
+dialog wired into app-shell between ModeToggle and LogoutButton, and a new
+`lib/mailer.ts` `sendPlainEmail` (extracted `buildTransporter` so it and
+`sendMagicLinkEmail` share one transporter constructor) for the best-effort
+admin email. New `GITEA_BASE_URL`/`GITEA_OWNER`/`GITEA_REPO`/`GITEA_TOKEN` env
+vars, the last one a secret placeholder in `dev-values.example.yaml` and
+`helm-charts/values.yaml`.
+
+Backup dives (#16): new `lib/backup/dives-zip.ts` builds a zip of `dives.json`
+/`dive_sites.json`/`bookmarks.json` plus every Suunto bundle's raw files
+under `suunto/<diveId>/` (new `extractAllFiles` in `lib/suunto/raw-bundle.ts`,
+alongside the existing `extractSmlJson`), served via `app/api/backup/dives/route.ts`
+(a route handler, not a server action, since the payload is binary — uses
+`getOptionalUser()` + a hard 401 rather than `requireUser()`, since that
+redirects and a `fetch()` download would silently save the login page as a
+`.zip`). New `/settings` page and a "Settings" entry in the Manage menu host
+the button; `lib/download-file.ts` gained a `downloadBlobFile` counterpart to
+the existing text one.
+
+Phase 4 found 2 HIGH (an unbounded-memory claim in a comment that didn't
+match the code — every decoded Suunto bundle stays resident in JSZip until
+`generateAsync()` with nothing capping the total, plus a redundant 3rd
+in-memory copy of the finished archive; and zero test coverage for the new
+zip builder, missing exactly the AGENTS.md rule 10 cross-user-isolation
+invariant the analogous `lib/padi/backup.ts` already has covered) and 5
+MEDIUM findings (N+1 bundle queries; synchronous `gunzipSync` making the
+decode "concurrency" bound a no-op; silently-colliding sanitized zip paths
+dropping files with no error; no rate limit on the feedback action's
+Gitea+email calls; a swallowed original error on the label-creation race
+path). Fixed all of it: `buildDivesBackupZip` now batches bundle fetches
+(`getDiveSuuntoOriginalBundles`), decodes via a real async `gunzip`, caps
+total decoded bytes at 300MB behind a new `BackupTooLargeError` (413, not a
+generic 500), de-duplicates colliding sanitized paths with a numeric suffix
+instead of overwriting, and the route handler passes the buffer straight
+through instead of copying it. Added `tests/integration/dives-backup-zip.test.ts`
+covering both users' isolation across dives/sites/bookmarks/bundles. The
+feedback action gained an in-memory sliding-window rate limit (3 per 10 min
+per user, documented as an abuse brake rather than a security boundary) and
+`GiteaApiError` now chains the original error as `cause` instead of dropping
+it. One `Buffer`-vs-`BodyInit` typecheck gap surfaced only after the fixes
+landed (a TS/@types/node generic mismatch, not a real bug) — fixed with a
+narrow cast rather than reintroducing a copy. Re-verified clean: typecheck,
+lint, `lint:unused`, `pnpm build`, 163/163 unit, 119/119 Postgres
+integration (up from 113, the 6 new isolation/zip-contents cases).

@@ -17,3 +17,19 @@ export function downloadTextFile(filename: string, content: string, mimeType = "
 
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// Binary counterpart of downloadTextFile, for content that arrives as a Blob from an authenticated
+// download route rather than as a string from a server action (the dives backup zip). Same
+// append/click/remove + deferred revoke dance, for the same Firefox/WebKit reasons described above.
+export function downloadBlobFile(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

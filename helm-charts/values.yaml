@@ -140,6 +140,7 @@ appSecrets:
   PADI_USERNAME_HASH_PEPPER: "replace-with-padi-username-hash-pepper"
   SUUNTO_SESSION_ENCRYPTION_KEY: "replace-with-suunto-session-encryption-key"
   SUUNTO_EMAIL_HASH_PEPPER: "replace-with-suunto-email-hash-pepper"
+  GITEA_TOKEN: "replace-with-gitea-feedback-token"
 
 resources:
   requests:

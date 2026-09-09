@@ -13,7 +13,7 @@ const emailDurationHistogram = meter.createHistogram("email.duration", {
   unit: "ms",
 });
 
-export type EmailType = "magic_link";
+export type EmailType = "magic_link" | "feedback";
 
 export async function withEmailTelemetry<T extends { sent: boolean }>(
   emailType: EmailType,

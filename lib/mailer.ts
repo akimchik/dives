@@ -2,7 +2,7 @@ import "server-only";
 
 import nodemailer from "nodemailer";
 import { logger } from "./logger";
-import { withEmailTelemetry } from "./email-otel";
+import { withEmailTelemetry, type EmailType } from "./email-otel";
 
 function envValue(...names: string[]) {
   for (const name of names) {
@@ -42,6 +42,18 @@ function isMailerConfigured() {
   return Boolean(settings.host && settings.port && settings.user && settings.password);
 }
 
+// Shared by every sender below so the transport options (STARTTLS handling in particular) can
+// only ever be configured in one place.
+function buildTransporter(settings: ReturnType<typeof getMailSettings>) {
+  return nodemailer.createTransport({
+    host: settings.host,
+    port: settings.port,
+    secure: false,
+    requireTLS: settings.starttls,
+    auth: { user: settings.user, pass: settings.password },
+  });
+}
+
 export async function sendMagicLinkEmail(input: {
   email: string;
   magicLinkUrl: string;
@@ -54,15 +66,7 @@ export async function sendMagicLinkEmail(input: {
       return { sent: false };
     }
 
-    const transporter = nodemailer.createTransport({
-      host: settings.host,
-      port: settings.port,
-      secure: false,
-      requireTLS: settings.starttls,
-      auth: { user: settings.user, pass: settings.password },
-    });
-
-    await transporter.sendMail({
+    await buildTransporter(settings).sendMail({
       from: { name: "Dives", address: settings.user },
       to: input.email,
       subject: "Create your Dives account",
@@ -73,6 +77,32 @@ export async function sendMagicLinkEmail(input: {
         "",
         "This link expires in 1 hour. If you did not request it, you can ignore this email.",
       ].join("\n"),
+    });
+
+    return { sent: true };
+  });
+}
+
+// Generic plain-text sender (currently the feedback notification to the admin, issue #22).
+// Mirrors sendMagicLinkEmail's graceful no-op when SMTP is not configured: callers treat a
+// missing mailer as "nothing to do", never as a failure.
+export async function sendPlainEmail(
+  input: { to: string; subject: string; text: string },
+  telemetryType: EmailType = "feedback",
+) {
+  return withEmailTelemetry(telemetryType, async () => {
+    const settings = getMailSettings();
+
+    if (!isMailerConfigured()) {
+      logger.info(`[DEV] Email to ${input.to} not sent ("${input.subject}"); SMTP is not configured.`);
+      return { sent: false };
+    }
+
+    await buildTransporter(settings).sendMail({
+      from: { name: "Dives", address: settings.user },
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
     });
 
     return { sent: true };

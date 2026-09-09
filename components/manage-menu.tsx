@@ -42,6 +42,11 @@ export function ManageMenu() {
             Integrations
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/settings" className="no-underline">
+            Settings
+          </Link>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

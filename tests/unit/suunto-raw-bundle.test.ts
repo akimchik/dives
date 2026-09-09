@@ -2,7 +2,7 @@ import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
-import { extractSmlJson } from "@/lib/suunto/raw-bundle";
+import { extractAllFiles, extractSmlJson } from "@/lib/suunto/raw-bundle";
 
 function bundleOf(files: { path: string; contentBase64: string }[]): Buffer {
   return gzipSync(Buffer.from(JSON.stringify({ files })));
@@ -32,5 +32,27 @@ describe("extractSmlJson", () => {
     const notGzip = Buffer.from("bundle:not-a-real-export");
 
     expect(() => extractSmlJson(notGzip)).toThrow();
+  });
+});
+
+describe("extractAllFiles", () => {
+  it("returns every file in the bundle with its content base64-decoded", async () => {
+    const bundle = bundleOf([
+      { path: "workout.sml.json", contentBase64: Buffer.from('{"a":1}').toString("base64") },
+      { path: "samples/raw.bin", contentBase64: Buffer.from([0x00, 0xff, 0x10]).toString("base64") },
+    ]);
+
+    expect(await extractAllFiles(bundle)).toEqual([
+      { path: "workout.sml.json", content: Buffer.from('{"a":1}') },
+      { path: "samples/raw.bin", content: Buffer.from([0x00, 0xff, 0x10]) },
+    ]);
+  });
+
+  it("returns an empty list for a bundle with no files (rather than throwing)", async () => {
+    expect(await extractAllFiles(bundleOf([]))).toEqual([]);
+  });
+
+  it("rejects on a bundle that isn't gzip at all, like extractSmlJson throws", async () => {
+    await expect(extractAllFiles(Buffer.from("bundle:not-a-real-export"))).rejects.toThrow();
   });
 });

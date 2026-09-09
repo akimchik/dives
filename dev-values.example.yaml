@@ -11,6 +11,10 @@ env:
   DIVES_ADMIN_EMAIL: "admin@aleksandr.vin"
   DIVES_ADMIN_NAME: "Mr. Admin"
   OTEL_DEPLOYMENT_ENVIRONMENT: "dev"
+  # In-app feedback button -> Gitea issue labelled `user-feedback` (issue #22).
+  GITEA_BASE_URL: "https://gitea.pumpking.aleksandr.vin"
+  GITEA_OWNER: "software-engineer-vinokurov"
+  GITEA_REPO: "dives"
 
 appSecrets:
   email_host_password: "replace-with-email-host-password"
@@ -19,6 +23,7 @@ appSecrets:
   PADI_USERNAME_HASH_PEPPER: "replace-with-padi-username-hash-pepper"
   SUUNTO_SESSION_ENCRYPTION_KEY: "replace-with-suunto-session-encryption-key"
   SUUNTO_EMAIL_HASH_PEPPER: "replace-with-suunto-email-hash-pepper"
+  GITEA_TOKEN: "replace-with-gitea-feedback-token"
 
 notifications:
   schedule: "*/2 * * * *"

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Waves } from "lucide-react";
 
+import { FeedbackButton } from "@/components/feedback-button";
 import { LogoutButton } from "@/components/logout-button";
 import { ManageMenu } from "@/components/manage-menu";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -8,7 +9,7 @@ import { NavLink } from "@/components/nav-link";
 
 /**
  * Chrome shared by every authenticated logbook screen: a compact header (brand, primary nav,
- * theme toggle, sign-out) over a centred content column.
+ * theme toggle, feedback, sign-out) over a centred content column.
  *
  * `relative z-10` on the wrapper is just a stacking context anchor: CausticOverlay renders at a
  * higher fixed z-25 so the light rays wash over page content (edit boxes, buttons, etc.) instead
@@ -46,6 +47,7 @@ export function AppShell({
               {email}
             </span>
             <ModeToggle />
+            <FeedbackButton />
             <LogoutButton />
           </div>
         </div>

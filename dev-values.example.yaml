@@ -12,7 +12,13 @@ env:
   DIVES_ADMIN_NAME: "Mr. Admin"
   OTEL_DEPLOYMENT_ENVIRONMENT: "dev"
   # In-app feedback button -> Gitea issue labelled `user-feedback` (issue #22).
-  GITEA_BASE_URL: "https://gitea.pumpking.aleksandr.vin"
+  # The public hostname sits behind a Traefik ip-allowlist Middleware in the gitea namespace
+  # (only one external IP is allowed) -- any in-cluster pod's own egress gets a bare 403
+  # "Forbidden" from that middleware, never reaching Gitea. Use the in-cluster ClusterIP
+  # Service instead (gitea/gitea in the gitea namespace), which bypasses the public ingress
+  # and its IP allowlist entirely. Only relevant for pumpking-hosted deployments; anywhere
+  # else, override this back to the public https:// hostname.
+  GITEA_BASE_URL: "http://gitea.gitea.svc.cluster.local:3000"
   GITEA_OWNER: "software-engineer-vinokurov"
   GITEA_REPO: "dives"
 

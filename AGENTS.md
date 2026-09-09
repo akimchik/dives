@@ -49,6 +49,20 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
     the URL or a form on its own. Cross-user access must return not-found/
     forbidden, never the data.
 
+11. This repo is mirrored to a public GitHub repo — every commit becomes
+    world-readable, and history is not something a later force-push can
+    quietly clean up once it's mirrored. Before each commit, check the diff
+    (not just the final file state) for secrets: API keys, tokens, passwords,
+    connection strings with embedded credentials, private keys. Pay particular
+    attention to `PROMPTLOG.md` — per rule 1 it logs every raw user prompt
+    verbatim, so a credential pasted into a prompt gets committed exactly like
+    any other text — and to newly hardcoded internal infra details (IPs,
+    internal hostnames, registry usernames) that shouldn't ship alongside the
+    real thing. See "Local, machine-specific instruction files" below for
+    where real secrets/deployment-specific values belong instead. If a check
+    turns up something questionable, stop and ask the user rather than
+    committing and redacting later.
+
 ## Project identity
 
 This repo was scaffolded from the upstream 21daylabs Next.js template.

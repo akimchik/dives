@@ -19,11 +19,12 @@ export async function GET() {
     // Same colon-free sortable stamp as lib/padi/backup.ts's padi-backup-<timestamp>.json filename.
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
-    // Buffer is runtime-compatible as a Response body (Node/undici accept it directly), but its
-    // type is generic over ArrayBufferLike while lib.dom.d.ts's BodyInit wants the ArrayBuffer-backed
-    // Uint8Array specifically -- a TS/@types/node typing gap, not a real mismatch. Cast rather than
-    // copy the archive again just to satisfy it.
-    return new Response(zip as unknown as BodyInit, {
+    // Buffer IS a Uint8Array and undici accepts it as a body directly, so it's passed through
+    // uncopied. The cast covers a pure typing gap: @types/node types Buffer as
+    // Buffer<ArrayBufferLike>, while lib.dom's BodyInit wants the ArrayBuffer-backed Uint8Array.
+    // Re-wrapping (new Uint8Array(zip)) would silence it by copying the whole archive -- not worth
+    // a megabytes-sized copy per download to avoid one cast.
+    return new Response(zip as BodyInit, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="dives-backup-${timestamp}.zip"`,

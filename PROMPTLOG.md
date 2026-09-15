@@ -1223,3 +1223,37 @@ the pre-fix code (temporarily reverted `listDivesForBackup` back to
 before committing it. Postgres integration suite: 118/120 passing (the 2
 failures are `registration.test.ts`'s pre-existing "password sign-in
 disabled" local-env mismatch, unrelated to this change).
+
+## 2026-09-15 — Combine CI workflows (issue #28)
+
+> /autopilot work on https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/28
+
+Issue #28 pointed at the sibling `gym` repo (`~/Developer/sev/gym`) as the
+reference pattern: a single `.gitea/workflows/ci.yml` with a `checks` job
+followed by a `deploy` job (`needs: checks`), rather than two independently
+`push`-triggered workflow files. dives had the pre-`gym` shape — separate
+`ci.yml` (lint/test/build) and `deploy.yml` (build image + helm upgrade),
+both triggered on `push` with no dependency between them, so on the
+self-hosted runner's shared per-repo checkout path a broken build could
+still race ahead to a live rollout, or `deploy`'s own checkout could
+clobber files mid-run of `checks`' e2e step.
+
+Fix: folded `deploy.yml`'s single `deploy` job into `ci.yml` as a second
+job with `needs: checks` and `if: github.ref == 'refs/heads/main' &&
+github.event_name == 'push'` (so it still only fires on real pushes to
+main, not PRs/dispatch), renamed the workflow to "CI and deploy" to match
+gym's, and deleted `deploy.yml`. Content is otherwise a straight port of
+gym's already-reviewed workflow, s/gym/dives/ on the postgres db/user
+names, `DIVES_ADMIN_*` env vars, image path (`dives/web`), helm release
+name, and namespace/deployment (`dev-dives`/`dives`) — no changes to the
+underlying steps. Verified the merged file parses as valid YAML with both
+`checks` and `deploy` jobs present (`ruby -ryaml`, since neither Python's
+`yaml` nor a local `js-yaml` module was available in this checkout).
+`docs/` has no references to the old two-file layout, so nothing there
+needed updating.
+
+Unlike issue #27, could not check whether #28 has a project-board
+attachment this session: the tea CLI has no `projects` subcommand, and
+reading tea's own config file to hit the Gitea Projects API directly via
+curl was blocked by the auto-mode permission classifier as credential
+extraction. Left for the user to attach/move on the board if needed.

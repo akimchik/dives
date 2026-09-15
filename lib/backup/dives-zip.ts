@@ -3,7 +3,7 @@ import "server-only";
 import JSZip from "jszip";
 
 import { listBookmarks } from "@/lib/bookmarks";
-import { getDiveSuuntoOriginalBundles, listDives, listDiveSites } from "@/lib/dives";
+import { getDiveSuuntoOriginalBundles, listDiveSites, listDivesForBackup } from "@/lib/dives";
 import { logger } from "@/lib/logger";
 import { mapWithConcurrency } from "@/lib/padi/concurrency";
 import { extractAllFiles } from "@/lib/suunto/raw-bundle";
@@ -90,7 +90,7 @@ function chunk<T>(items: T[], size: number): T[][] {
  */
 export async function buildDivesBackupZip(userId: string): Promise<Buffer> {
   const [dives, sites, bookmarks] = await Promise.all([
-    listDives(userId),
+    listDivesForBackup(userId),
     listDiveSites(userId),
     listBookmarks(userId),
   ]);

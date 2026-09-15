@@ -233,6 +233,19 @@ const snapshotColumns = `
   s.lng as site_lng
 `;
 
+// Lean variant of snapshotColumns for list/summary reads that never render a dive's Suunto profile.
+// suunto_profile holds a whole dive-computer download's per-second GPS/HR/temperature samples --
+// megabytes for a single imported dive -- and snapshotColumns selected it unconditionally on every
+// row. Dashboard, Logbook and the detail page's own "other dives" list (used only for prev/next SAC
+// comparison) only ever render title/site/depth/tags/rating, so that JSON was paid for (stringified
+// out of Postgres, parsed back in Node, and for a while shipped whole to the browser) on every load
+// without being read. Same root cause as the sibling gym app's issue #32. getDive/loadSnapshot/
+// listDivesForBackup keep the full column for the single-dive and backup paths that actually need it.
+const snapshotColumnsLean = snapshotColumns.replace(
+  "d.suunto_profile",
+  "null::jsonb as suunto_profile",
+);
+
 // The join is scoped by user_id on both sides: even if a dive somehow referenced a foreign site,
 // its details would not be readable here.
 const diveFrom = `
@@ -531,6 +544,23 @@ async function resolveDiveSiteId(
 export async function listDives(userId: string): Promise<DiveRecord[]> {
   const result = await queryRead<DiveRecord>(
     `
+      select ${snapshotColumnsLean}, d.dive_site_id
+      ${diveFrom}
+      where d.user_id = $1
+      order by d.occurred_at desc, d.id desc
+    `,
+    [userId],
+  );
+
+  return result.rows;
+}
+
+// Full-profile counterpart of listDives for the one caller that actually needs suunto_profile on
+// every row: buildDivesBackupZip's dives.json is documented (issue #16) as "everything this app
+// stores for one user's dives", so unlike the UI list views it may not silently drop the profile.
+export async function listDivesForBackup(userId: string): Promise<DiveRecord[]> {
+  const result = await queryRead<DiveRecord>(
+    `
       select ${snapshotColumns}, d.dive_site_id
       ${diveFrom}
       where d.user_id = $1
@@ -622,7 +652,7 @@ export async function listSuuntoMergeDiveCandidates(
   const preferred = preferredAt ? new Date(preferredAt) : null;
   const result = await queryRead<SuuntoMergeDiveCandidate>(
     `
-      select ${snapshotColumns}, d.dive_site_id
+      select ${snapshotColumnsLean}, d.dive_site_id
       ${diveFrom}
       where d.user_id = $1
         and d.suunto_workout_key is null

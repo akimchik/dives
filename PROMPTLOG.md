@@ -1180,3 +1180,35 @@ landed (a TS/@types/node generic mismatch, not a real bug) — fixed with a
 narrow cast rather than reintroducing a copy. Re-verified clean: typecheck,
 lint, `lint:unused`, `pnpm build`, 163/163 unit, 119/119 Postgres
 integration (up from 113, the 6 new isolation/zip-contents cases).
+
+## 2026-09-15 — Fix slow Dashboard/Logbook loads (issue #27)
+
+> /autopilot please work on https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/27
+
+Issue #27 pointed at the sibling `gym` app's issue #32, which had already
+root-caused the identical symptom there: a shared list/detail query selecting
+a heavy per-row JSON column unconditionally, even though only the single-dive
+detail view ever read it. Audited this repo for the same shape rather than
+reaching for the issue's other suggestion (a Redis cache) first, and found
+the exact match: `lib/dives.ts`'s `snapshotColumns` — used by `listDives`,
+shared by `/dashboard`, `/dives` (Logbook), and the dive detail page's own
+"other dives" list (used only for SAC-rate comparison) — selected
+`suunto_profile` on every row. That column holds a whole dive-computer
+download's per-second GPS/HR/temperature samples, megabytes for one imported
+dive, none of which any of those three views render.
+
+Fix: added `snapshotColumnsLean` (swaps `d.suunto_profile` for a
+`null::jsonb` literal, so `DiveRecord`'s shape is unchanged) and switched
+`listDives` and `listSuuntoMergeDiveCandidates` to it — the latter can never
+have a `suunto_profile` anyway, since its own `where` clause requires
+`suunto_workout_key is null`. Added `listDivesForBackup`, a full-`snapshotColumns`
+sibling of `listDives`, and pointed `buildDivesBackupZip` at it instead, since
+the backup zip's `dives.json` is documented as a complete export and must not
+silently lose the profile. `getDive`/`loadSnapshot` (single-dive detail/edit,
+mutation snapshots) were already correctly on the full column set and
+untouched. Updated `docs/development.md` with a new "Lean list reads"
+section. Issue #27 has no project-board attachment (`"projects":null` via
+the Gitea API), so there was no board status to move.
+
+Verified: typecheck, lint, `lint:unused`, and the full test suite (163/163)
+all clean after the change.

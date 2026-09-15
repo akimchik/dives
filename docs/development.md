@@ -481,7 +481,10 @@ selects whose data is archived.
 `lib/backup/dives-zip.ts`'s `buildDivesBackupZip(userId)` assembles the archive
 with `jszip`:
 
-- `dives.json` — `listDives(userId)`, the same flat snapshot the backup emails use.
+- `dives.json` — `listDivesForBackup(userId)`, the same flat snapshot the backup
+  emails use, but via its own full-`snapshotColumns` query rather than the
+  UI's `listDives` (see "Lean list reads" below) — a backup must not silently
+  drop `suunto_profile`.
 - `dive_sites.json` — `listDiveSites(userId)`.
 - `bookmarks.json` — `listBookmarks(userId)`.
 - `suunto/<diveId>/<path>` — the *raw* Suunto export bundle, unpacked verbatim.
@@ -608,6 +611,32 @@ bundle that doesn't decode as that shape (e.g. a test fixture's placeholder byte
 renders an inline "couldn't be read" message rather than a 500. The dive detail
 page links to this route whenever `suunto_workout_key` is set, independent of
 whether the compiled `suunto_profile` chart itself renders.
+
+### Lean list reads
+
+Issue #27: Dashboard and Logbook were taking seconds to load. The sibling `gym`
+app had already diagnosed the identical symptom in its own suunto-backed table
+(issue #32) — a heavy JSON column selected unconditionally by a shared
+list/detail query — so this repo was audited for the same pattern rather than
+reaching for caching first. `suunto_profile` holds a whole dive-computer
+download's per-second GPS/HR/temperature samples (megabytes for one imported
+dive), and `lib/dives.ts`'s `snapshotColumns` selected it on every row of every
+read, including `listDives` — shared by Dashboard, Logbook, and the dive detail
+page's own "other dives" list (used only to find the prior dives for SAC-rate
+comparison). None of those views render a dive's Suunto profile; only the
+single-dive detail/edit pages (`getDive`) do. That unconditional `unknown`
+JSONB round-tripped through `JSON.stringify`/`JSON.parse` on every list load
+whether or not any dive in it even had Suunto data.
+
+The fix is `snapshotColumnsLean` (`d.suunto_profile` swapped for a
+`null::jsonb` literal, so `DiveRecord`'s shape is unchanged) used by `listDives`
+and `listSuuntoMergeDiveCandidates` — neither reads `suunto_profile`, and
+merge candidates in particular can never have one anyway, since they're
+queried `where d.suunto_workout_key is null`. `getDive`, the mutation
+transactions' `loadSnapshot`, and the new `listDivesForBackup` (used only by
+`buildDivesBackupZip`, see "Dives backup zip" above) keep the full
+`snapshotColumns` — the backup's `dives.json` is documented as a complete
+export and must not silently lose the profile.
 
 Unlike `SuuntoProfileChart` (which was deliberately narrowed to just `points` after
 a prior review flagged the whole profile blob crossing the server→client boundary

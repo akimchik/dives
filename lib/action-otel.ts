@@ -30,13 +30,20 @@ function isFrameworkControlFlowError(error: unknown): boolean {
   );
 }
 
-// Most actions in app/actions/** already return a `{ ok: boolean }` discriminated union (see e.g.
+// Most actions in app/actions/** return a `{ ok: boolean }` discriminated union (see e.g.
 // DiveActionResult, PadiActionResult) for business-level failures that are reported to the user
-// rather than thrown. Surfacing that in the metric (as "failure" rather than "success") is what
-// makes the per-action counter actually useful for spotting e.g. a spike in rejected PADI logins.
-function resultStatus(result: unknown): "success" | "failure" {
-  if (result && typeof result === "object" && "ok" in result) {
-    return (result as { ok: unknown }).ok === false ? "failure" : "success";
+// rather than thrown; app/actions/auth.ts's AuthActionState instead uses a truthy `error` string
+// for the same purpose. Surfacing either convention in the metric (as "failure" rather than
+// "success") is what makes the per-action counter actually useful for spotting e.g. a spike in
+// rejected logins or PADI connection attempts.
+export function resultStatus(result: unknown): "success" | "failure" {
+  if (result && typeof result === "object") {
+    if ("ok" in result) {
+      return (result as { ok: unknown }).ok === false ? "failure" : "success";
+    }
+    if ("error" in result && (result as { error: unknown }).error) {
+      return "failure";
+    }
   }
   return "success";
 }
@@ -46,7 +53,7 @@ function resultStatus(result: unknown): "success" | "failure" {
 // or "anonymous" for actions that ran without (or before) an authenticated session.
 // This is a deliberately high-cardinality label (one series per user) -- an explicit product
 // requirement here, not the usual metrics hygiene default.
-function userLabel(user: ActionTelemetryUser): string {
+export function userLabel(user: ActionTelemetryUser): string {
   if (!user) return "anonymous";
   return user.email || `user:${user.id}`;
 }
@@ -63,7 +70,9 @@ export async function withActionTelemetry<T>(
   getUser: () => ActionTelemetryUser,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const start = Date.now();
+  // Monotonic, unlike Date.now(): a system clock adjustment mid-request must never turn into a
+  // negative duration, and fetchSuuntoWorkoutsAction alone can legitimately run for minutes.
+  const start = performance.now();
   let status: ActionStatus = "error";
 
   return tracer.startActiveSpan(`action.${actionName}`, async (span) => {
@@ -82,10 +91,19 @@ export async function withActionTelemetry<T>(
       }
       throw error;
     } finally {
-      const attributes = { action: actionName, status, user: userLabel(getUser()) };
-      actionCounter.add(1, attributes);
-      actionDurationHistogram.record(Date.now() - start, attributes);
-      span.end();
+      // Telemetry emission must never be what decides this action's outcome: a throw from any of
+      // these calls would, per JS finally semantics, replace whatever is currently propagating --
+      // including a redirect(), which is how login/logout/registration actually complete.
+      try {
+        const attributes = { action: actionName, status, user: userLabel(getUser()) };
+        span.setAttributes({ "action.status": status, "action.user": attributes.user });
+        actionCounter.add(1, attributes);
+        actionDurationHistogram.record(performance.now() - start, attributes);
+      } catch (telemetryError) {
+        console.error("action telemetry failed", telemetryError);
+      } finally {
+        span.end();
+      }
     }
   });
 }

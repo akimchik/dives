@@ -747,6 +747,11 @@ activity can be attributed per person. Actions that don't know their user
 until mid-flow (`loginAction`, `completeRegistrationAction`) pass a closure
 over a `let` variable assigned once the user is resolved, since
 `withActionTelemetry` reads it lazily after the wrapped function settles.
+`requireUser()` itself sits outside the wrapper in every protected action and
+`redirect()`s on its own for an unauthenticated caller (a deliberate choice —
+it avoids a second session lookup per action, see the git history on
+`lib/session.ts`), so that redirect is invisible to these metrics and
+`app.action.duration` never includes the session lookup's own latency.
 
 ## Deployment
 

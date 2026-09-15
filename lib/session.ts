@@ -53,24 +53,34 @@ export async function createSession(userId: string) {
   cookieStore.set(cookieName, token, options);
 }
 
-// Returns the deleted session's id_token (if it had one), so the caller
-// can use it to also end the Authentik-side session -- see logoutAction.
-export async function deleteSession(): Promise<string | null> {
+// Returns the deleted session's id_token (if it had one), so the caller can use it to also end
+// the Authentik-side session -- see logoutAction -- plus the departing user (for logging/metrics),
+// resolved from the same deleted row rather than a separate pre-read. A separate getOptionalUser()
+// call before this one would race with it: Next's cookies().delete() rewrites the cookie's value
+// to "" in the mutable jar rather than removing it, so a subsequent deleteSession() would read
+// back an empty token and silently skip both the row deletion and the Authentik logout below.
+// Not filtered on expires_at -- logout must reap the row and surface its id_token even for an
+// already-expired session, so the Authentik-side session still gets ended too.
+export async function deleteSession(): Promise<{ idToken: string | null; user: AppUser | null }> {
   const cookieStore = await cookies();
   const token = cookieStore.get(cookieName)?.value;
   let idToken: string | null = null;
+  let user: AppUser | null = null;
 
   if (token) {
     const tokenHash = hashSessionToken(token);
-    const result = await getPool().query<{ id_token: string | null }>(
-      "delete from user_sessions where id = $1 returning id_token",
+    const result = await getPool().query<{ id_token: string | null; user_id: string }>(
+      "delete from user_sessions where id = $1 returning id_token, user_id",
       [tokenHash],
     );
     idToken = result.rows[0]?.id_token ?? null;
+    if (result.rows[0]) {
+      user = await findActiveUserById(result.rows[0].user_id);
+    }
   }
 
   cookieStore.delete(cookieName);
-  return idToken;
+  return { idToken, user };
 }
 
 async function findSessionUserId(tokenHash: string): Promise<string | null> {

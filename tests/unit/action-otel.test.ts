@@ -1,6 +1,46 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { withActionTelemetry } from "@/lib/action-otel";
+import { resultStatus, userLabel, withActionTelemetry } from "@/lib/action-otel";
+
+describe("resultStatus", () => {
+  it("labels a { ok: false } discriminated-union result as failure", () => {
+    expect(resultStatus({ ok: false, error: "Dive not found." })).toBe("failure");
+  });
+
+  it("labels a { ok: true } discriminated-union result as success", () => {
+    expect(resultStatus({ ok: true, id: 1 })).toBe("success");
+  });
+
+  // app/actions/auth.ts's AuthActionState uses this convention instead of { ok } -- this is the
+  // exact shape a code review caught being silently mislabeled "success" before this test existed.
+  it("labels a truthy { error } result (auth.ts's AuthActionState convention) as failure", () => {
+    expect(resultStatus({ error: "Invalid email or password." })).toBe("failure");
+  });
+
+  it("labels a { error: undefined } result (AuthActionState's success case) as success", () => {
+    expect(resultStatus({ error: undefined })).toBe("success");
+  });
+
+  it("labels a bare array/primitive result (e.g. searchDiveSitesAction) as success", () => {
+    expect(resultStatus([])).toBe("success");
+    expect(resultStatus(undefined)).toBe("success");
+  });
+});
+
+describe("userLabel", () => {
+  it("prefers the user's email", () => {
+    expect(userLabel({ id: "1", email: "diver@aleksandr.vin" })).toBe("diver@aleksandr.vin");
+  });
+
+  it("falls back to a stable user id when email is missing", () => {
+    expect(userLabel({ id: "1", email: null })).toBe("user:1");
+    expect(userLabel({ id: "1" })).toBe("user:1");
+  });
+
+  it("labels an unauthenticated call as anonymous", () => {
+    expect(userLabel(null)).toBe("anonymous");
+  });
+});
 
 describe("withActionTelemetry", () => {
   it("returns the wrapped function's result unchanged", async () => {

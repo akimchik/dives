@@ -9,7 +9,7 @@ import { getRequestOrigin } from "@/lib/base-url";
 import { createMagicLinkToken, consumeMagicLinkToken } from "@/lib/magic-link";
 import { sendMagicLinkEmail } from "@/lib/mailer";
 import { safeRedirectPath } from "@/lib/safe-redirect";
-import { createSession, deleteSession, getOptionalUser } from "@/lib/session";
+import { createSession, deleteSession } from "@/lib/session";
 import { createUser, findActiveUserByEmail, type AppUser } from "@/lib/users";
 import { verifyPassword } from "@/lib/passwords";
 import { recordSignup, recordSignin, recordLogout } from "@/lib/auth-otel";
@@ -189,12 +189,15 @@ async function buildAuthentikLogoutUrl(idToken: string): Promise<string | null> 
 }
 
 export async function logoutAction() {
-  // Read before deleteSession() removes the row it's derived from -- otherwise there'd be no way
-  // to label this action's metrics with who logged out.
-  const user = await getOptionalUser();
+  // Assigned inside fn() from deleteSession()'s own return value, not a separate getOptionalUser()
+  // pre-read: that raced with deleteSession() below, since Next's cookies().delete() rewrites the
+  // cookie's value to "" in the mutable jar rather than removing it -- deleteSession() would then
+  // read back an empty token and silently skip both the row deletion and the Authentik logout.
+  let resolvedUser: AppUser | null = null;
 
-  return withActionTelemetry("logout", () => user, async () => {
-    const idToken = await deleteSession();
+  return withActionTelemetry("logout", () => resolvedUser, async () => {
+    const { idToken, user } = await deleteSession();
+    resolvedUser = user;
     recordLogout(idToken ? "oidc" : "password");
 
     if (idToken) {

@@ -9,6 +9,7 @@ import {
   type BookmarkInput,
   type BookmarkRow,
 } from "@/lib/bookmarks";
+import { withActionTelemetry } from "@/lib/action-otel";
 import { requireUser } from "@/lib/session";
 
 export type BookmarkActionResult =
@@ -27,13 +28,15 @@ function toActionError(error: unknown): { ok: false; error: string } {
 export async function createBookmarkAction(input: BookmarkInput): Promise<BookmarkActionResult> {
   const user = await requireUser();
 
-  try {
-    const bookmark = await createBookmark(user.id, input);
-    revalidatePath("/bookmarks");
-    return { ok: true, bookmark };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("createBookmark", () => user, async () => {
+    try {
+      const bookmark = await createBookmark(user.id, input);
+      revalidatePath("/bookmarks");
+      return { ok: true, bookmark };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }
 
 export async function deleteBookmarkAction(
@@ -41,11 +44,13 @@ export async function deleteBookmarkAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
 
-  try {
-    await deleteBookmark(user.id, bookmarkId);
-    revalidatePath("/bookmarks");
-    return { ok: true };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("deleteBookmark", () => user, async () => {
+    try {
+      await deleteBookmark(user.id, bookmarkId);
+      revalidatePath("/bookmarks");
+      return { ok: true };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }

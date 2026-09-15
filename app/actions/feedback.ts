@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { createFeedbackIssue } from "@/lib/gitea/client";
 import { logger } from "@/lib/logger";
 import { sendPlainEmail } from "@/lib/mailer";
+import { withActionTelemetry } from "@/lib/action-otel";
 
 // Same discriminated-union convention as app/actions/padi.ts's PadiActionResult: the button shows
 // a spinner and toasts the outcome (AGENTS.md rule 5), so failures come back as a result rather
@@ -49,52 +50,54 @@ function buildTitle(message: string) {
 export async function submitFeedbackAction(message: string): Promise<FeedbackActionResult> {
   const user = await requireUser();
 
-  // Server actions are a public HTTP surface: the argument is whatever the caller posted, not
-  // necessarily the string the typed client sends.
-  if (typeof message !== "string") {
-    return { ok: false, error: "Please enter some feedback before submitting." };
-  }
+  return withActionTelemetry("submitFeedback", () => user, async () => {
+    // Server actions are a public HTTP surface: the argument is whatever the caller posted, not
+    // necessarily the string the typed client sends.
+    if (typeof message !== "string") {
+      return { ok: false, error: "Please enter some feedback before submitting." };
+    }
 
-  const trimmed = message.trim();
-  if (!trimmed) {
-    return { ok: false, error: "Please enter some feedback before submitting." };
-  }
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return { ok: false, error: "Please enter some feedback before submitting." };
+    }
 
-  // Checked after validation but before any Gitea/SMTP call, so an empty submission never spends
-  // the user's budget and a rejected one never costs an outbound request.
-  if (isRateLimited(user.id)) {
-    return { ok: false, error: RATE_LIMITED_ERROR };
-  }
+    // Checked after validation but before any Gitea/SMTP call, so an empty submission never spends
+    // the user's budget and a rejected one never costs an outbound request.
+    if (isRateLimited(user.id)) {
+      return { ok: false, error: RATE_LIMITED_ERROR };
+    }
 
-  // Truncated silently rather than rejected: an over-long message is still useful feedback, it
-  // just must not turn into an unbounded Gitea issue body.
-  const body = trimmed.slice(0, MAX_MESSAGE_LENGTH);
-  const title = buildTitle(body);
-  const issueBody = [body, "", "---", `Submitted by: ${user.email}`, `At: ${new Date().toISOString()}`].join("\n");
+    // Truncated silently rather than rejected: an over-long message is still useful feedback, it
+    // just must not turn into an unbounded Gitea issue body.
+    const body = trimmed.slice(0, MAX_MESSAGE_LENGTH);
+    const title = buildTitle(body);
+    const issueBody = [body, "", "---", `Submitted by: ${user.email}`, `At: ${new Date().toISOString()}`].join("\n");
 
-  let issue: Awaited<ReturnType<typeof createFeedbackIssue>>;
-  try {
-    issue = await createFeedbackIssue({ title, body: issueBody });
-  } catch (error) {
-    // The real cause (including any Gitea status) is only ever logged server-side; the client
-    // gets a generic message so nothing about the Gitea deployment or its token can leak.
-    // pino's error serializer keeps the full Error -- message, stack and the `cause` chain the
-    // Gitea client attaches -- so the raw object is what gets logged, not just its message.
-    logger.error({ err: error, userId: user.id }, "Failed to create Gitea feedback issue");
-    return { ok: false, error: UNAVAILABLE_ERROR };
-  }
+    let issue: Awaited<ReturnType<typeof createFeedbackIssue>>;
+    try {
+      issue = await createFeedbackIssue({ title, body: issueBody });
+    } catch (error) {
+      // The real cause (including any Gitea status) is only ever logged server-side; the client
+      // gets a generic message so nothing about the Gitea deployment or its token can leak.
+      // pino's error serializer keeps the full Error -- message, stack and the `cause` chain the
+      // Gitea client attaches -- so the raw object is what gets logged, not just its message.
+      logger.error({ err: error, userId: user.id }, "Failed to create Gitea feedback issue");
+      return { ok: false, error: UNAVAILABLE_ERROR };
+    }
 
-  // Best effort: the durable record (the issue) already exists, so a mail failure must not turn a
-  // successful submission into an error the user is asked to retry.
-  try {
-    await sendPlainEmail({
-      to: process.env.DIVES_ADMIN_EMAIL || "admin@aleksandr.vin",
-      subject: `New feedback: ${title}`,
-      text: [issueBody, "", `Gitea issue: ${issue.url}`].join("\n"),
-    });
-  } catch (error) {
-    logger.error({ err: error, issueNumber: issue.number }, "Failed to email feedback notification");
-  }
+    // Best effort: the durable record (the issue) already exists, so a mail failure must not turn a
+    // successful submission into an error the user is asked to retry.
+    try {
+      await sendPlainEmail({
+        to: process.env.DIVES_ADMIN_EMAIL || "admin@aleksandr.vin",
+        subject: `New feedback: ${title}`,
+        text: [issueBody, "", `Gitea issue: ${issue.url}`].join("\n"),
+      });
+    } catch (error) {
+      logger.error({ err: error, issueNumber: issue.number }, "Failed to email feedback notification");
+    }
 
-  return { ok: true };
+    return { ok: true };
+  });
 }

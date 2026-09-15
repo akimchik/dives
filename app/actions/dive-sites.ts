@@ -11,6 +11,7 @@ import {
   type DiveSiteMergeResult,
   type DiveSiteWithDiveCount,
 } from "@/lib/dives";
+import { withActionTelemetry } from "@/lib/action-otel";
 import { requireUser } from "@/lib/session";
 
 export type DiveSiteActionResult =
@@ -43,23 +44,27 @@ function toDiveSiteActionError(error: unknown): { ok: false; error: string } {
 export async function updateDiveSiteAction(siteId: number, input: DiveSiteInput): Promise<DiveSiteActionResult> {
   const user = await requireUser();
 
-  try {
-    const site = await updateDiveSite(user.id, siteId, input);
-    revalidateDiveSitePaths();
-    return { ok: true, site };
-  } catch (error) {
-    return toDiveSiteActionError(error);
-  }
+  return withActionTelemetry("updateDiveSite", () => user, async () => {
+    try {
+      const site = await updateDiveSite(user.id, siteId, input);
+      revalidateDiveSitePaths();
+      return { ok: true, site };
+    } catch (error) {
+      return toDiveSiteActionError(error);
+    }
+  });
 }
 
 export async function mergeDiveSitesAction(input: DiveSiteMergeInput): Promise<DiveSiteMergeActionResult> {
   const user = await requireUser();
 
-  try {
-    const result = await mergeDiveSites(user.id, input);
-    revalidateDiveSitePaths();
-    return { ok: true, ...result };
-  } catch (error) {
-    return toDiveSiteActionError(error);
-  }
+  return withActionTelemetry("mergeDiveSites", () => user, async () => {
+    try {
+      const result = await mergeDiveSites(user.id, input);
+      revalidateDiveSitePaths();
+      return { ok: true, ...result };
+    } catch (error) {
+      return toDiveSiteActionError(error);
+    }
+  });
 }

@@ -16,6 +16,7 @@ import {
   type DiveSiteRow,
   type RecentCylinder,
 } from "@/lib/dives";
+import { withActionTelemetry } from "@/lib/action-otel";
 import { requireUser } from "@/lib/session";
 
 // Buttons calling these show a spinner and toast the outcome (AGENTS.md), so failures come back as
@@ -45,13 +46,13 @@ function revalidateDives(diveId?: number) {
 // Autocomplete source for the dive form's site field -- the session user's own sites only.
 export async function searchDiveSitesAction(query?: string): Promise<DiveSiteRow[]> {
   const user = await requireUser();
-  return listDiveSites(user.id, query);
+  return withActionTelemetry("searchDiveSites", () => user, () => listDiveSites(user.id, query));
 }
 
 // Autocomplete source for the dive form's tags field -- the session user's own tag vocabulary only.
 export async function searchTagsAction(query?: string): Promise<string[]> {
   const user = await requireUser();
-  return listUserTags(user.id, query);
+  return withActionTelemetry("searchTags", () => user, () => listUserTags(user.id, query));
 }
 
 // Create-or-reuse for a name typed into that autocomplete.
@@ -63,52 +64,60 @@ export async function createDiveSiteAction(input: {
 }): Promise<{ ok: true; site: DiveSiteRow } | { ok: false; error: string }> {
   const user = await requireUser();
 
-  try {
-    return { ok: true, site: await findOrCreateDiveSite(user.id, input) };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("createDiveSite", () => user, async () => {
+    try {
+      return { ok: true, site: await findOrCreateDiveSite(user.id, input) };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }
 
 // Populates the dive form's optional "recent cylinder" picker -- the session user's own last 5
 // distinct cylinders only.
 export async function recentCylindersAction(): Promise<RecentCylinder[]> {
   const user = await requireUser();
-  return listRecentCylinders(user.id);
+  return withActionTelemetry("recentCylinders", () => user, () => listRecentCylinders(user.id));
 }
 
 export async function createDiveAction(input: DiveInput): Promise<DiveActionResult> {
   const user = await requireUser();
 
-  try {
-    const dive = await createDive(user, input);
-    revalidateDives(dive.id);
-    return { ok: true, id: dive.id };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("createDive", () => user, async () => {
+    try {
+      const dive = await createDive(user, input);
+      revalidateDives(dive.id);
+      return { ok: true, id: dive.id };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }
 
 export async function updateDiveAction(diveId: number, input: DiveInput): Promise<DiveActionResult> {
   const user = await requireUser();
 
-  try {
-    const dive = await updateDive(user, diveId, input);
-    revalidateDives(dive.id);
-    return { ok: true, id: dive.id };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("updateDive", () => user, async () => {
+    try {
+      const dive = await updateDive(user, diveId, input);
+      revalidateDives(dive.id);
+      return { ok: true, id: dive.id };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }
 
 export async function deleteDiveAction(diveId: number): Promise<DiveActionResult> {
   const user = await requireUser();
 
-  try {
-    const dive = await deleteDive(user, diveId);
-    revalidateDives(diveId);
-    return { ok: true, id: dive.id };
-  } catch (error) {
-    return toActionError(error);
-  }
+  return withActionTelemetry("deleteDive", () => user, async () => {
+    try {
+      const dive = await deleteDive(user, diveId);
+      revalidateDives(diveId);
+      return { ok: true, id: dive.id };
+    } catch (error) {
+      return toActionError(error);
+    }
+  });
 }

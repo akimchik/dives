@@ -1257,3 +1257,49 @@ attachment this session: the tea CLI has no `projects` subcommand, and
 reading tea's own config file to hit the Gitea Projects API directly via
 curl was blocked by the auto-mode permission classifier as credential
 extraction. Left for the user to attach/move on the board if needed.
+
+## 2026-09-15 — Per-action metrics with user labels (issue #26)
+
+> /autopilot work on https://gitea.pumpking.aleksandr.vin/software-engineer-vinokurov/dives/issues/26
+
+Issue #26: populate metrics via the existing OTEL integration for every
+action on the web app, labeled with the session user's email (or a stable
+fallback id) for authenticated sessions.
+
+Found the existing `lib/auth-otel.ts` / `lib/email-otel.ts` pattern (a
+`@opentelemetry/api` meter per domain, counters/histograms recorded around
+specific calls) and generalized it into `lib/action-otel.ts`'s
+`withActionTelemetry(actionName, getUser, fn)`, wrapped around every
+exported function in `app/actions/**` (bookmarks, dive-sites, dives,
+feedback, padi, suunto, auth — ~26 actions). Emits `app.action.calls` /
+`app.action.duration`, labeled `action`, `status`
+(`success`/`failure`/`redirect`/`error`, where `failure` picks up on each
+action's own `{ ok: false }` result rather than only thrown exceptions),
+and `user` (email, falling back to `user:<id>`, or `"anonymous"`).
+
+Two design points worth remembering:
+- `getUser` is a thunk, not a plain value, so actions that don't know their
+  user until mid-flow (`loginAction`, `completeRegistrationAction`) can
+  assign a `let` inside the wrapped function and have the wrapper read it
+  back lazily from its `finally` block, which runs after the function
+  settles (including after a thrown `redirect()`).
+- Redirect/notFound control-flow errors are detected via the `digest`
+  string prefix Next.js tags them with (`NEXT_REDIRECT`,
+  `NEXT_HTTP_ERROR_FALLBACK` — see node_modules/next/dist/client/components/
+  redirect.js and http-access-fallback.js) so they're labeled `redirect`
+  rather than `error`; the wrapper always rethrows unconditionally either
+  way, so this only affects the label, never control flow. Considered
+  `unstable_rethrow` first but it's unnecessary here since nothing is ever
+  swallowed.
+Deliberately did *not* wrap `getOptionalUser`/`requireUser` in React's
+`cache()` to dedupe the extra session lookup this adds per action: it would
+leak state across `it()` blocks in the Vitest integration suite (no
+Next.js per-request AsyncLocalStorage boundary there), so instead each
+action's already-resolved `user` variable is passed straight into the
+wrapper's `getUser` thunk at zero extra query cost.
+
+Verified: `pnpm typecheck`, `pnpm lint`, `pnpm lint:unused`, `pnpm build`,
+`pnpm test:unit` (167/167), and `pnpm test:pg` against the local
+`dives-postgres` container (120/120) all pass. Added
+`tests/unit/action-otel.test.ts` covering the wrapper's pass-through,
+error/redirect rethrow, and lazy-user-resolution behavior.

@@ -9,10 +9,11 @@ import { getRequestOrigin } from "@/lib/base-url";
 import { createMagicLinkToken, consumeMagicLinkToken } from "@/lib/magic-link";
 import { sendMagicLinkEmail } from "@/lib/mailer";
 import { safeRedirectPath } from "@/lib/safe-redirect";
-import { createSession, deleteSession } from "@/lib/session";
-import { createUser, findActiveUserByEmail } from "@/lib/users";
+import { createSession, deleteSession, getOptionalUser } from "@/lib/session";
+import { createUser, findActiveUserByEmail, type AppUser } from "@/lib/users";
 import { verifyPassword } from "@/lib/passwords";
 import { recordSignup, recordSignin, recordLogout } from "@/lib/auth-otel";
+import { withActionTelemetry } from "@/lib/action-otel";
 
 const passwordAuthDisabledMessage = "Password sign-in is currently disabled. Use Authentik to sign in.";
 
@@ -53,57 +54,66 @@ export async function startAuthAction(
   email: string,
   nextPath?: string,
 ): Promise<StartAuthResult> {
-  if (!isPasswordAuthEnabled()) {
-    throw new Error(passwordAuthDisabledMessage);
-  }
+  return withActionTelemetry("startAuth", () => null, async () => {
+    if (!isPasswordAuthEnabled()) {
+      throw new Error(passwordAuthDisabledMessage);
+    }
 
-  const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
 
-  if (!normalizedEmail) {
-    throw new Error("Email is required.");
-  }
+    if (!normalizedEmail) {
+      throw new Error("Email is required.");
+    }
 
-  const existing = await findActiveUserByEmail(normalizedEmail);
+    const existing = await findActiveUserByEmail(normalizedEmail);
 
-  if (existing) {
-    return { mode: "password" };
-  }
+    if (existing) {
+      return { mode: "password" };
+    }
 
-  const { token } = await createMagicLinkToken(normalizedEmail);
-  const origin = await getRequestOrigin();
-  await sendMagicLinkEmail({
-    email: normalizedEmail,
-    magicLinkUrl: buildMagicLinkUrl(origin, token, nextPath),
+    const { token } = await createMagicLinkToken(normalizedEmail);
+    const origin = await getRequestOrigin();
+    await sendMagicLinkEmail({
+      email: normalizedEmail,
+      magicLinkUrl: buildMagicLinkUrl(origin, token, nextPath),
+    });
+
+    return { mode: "magic_sent" };
   });
-
-  return { mode: "magic_sent" };
 }
 
 export async function loginAction(
   _prevState: AuthActionState,
   formData: FormData,
 ): Promise<AuthActionState> {
-  if (!isPasswordAuthEnabled()) {
-    return { error: passwordAuthDisabledMessage };
-  }
+  // Not known until credentials are verified below -- withActionTelemetry reads this closure
+  // lazily in its `finally`, after `fn` (including its final `redirect()`) has already run.
+  let resolvedUser: AppUser | null = null;
 
-  const { email, password, next } = readCredentials(formData);
+  return withActionTelemetry("login", () => resolvedUser, async () => {
+    if (!isPasswordAuthEnabled()) {
+      return { error: passwordAuthDisabledMessage };
+    }
 
-  if (!email || !password) {
-    return { error: "Email and password are required." };
-  }
+    const { email, password, next } = readCredentials(formData);
 
-  const user = await findActiveUserByEmail(email);
+    if (!email || !password) {
+      return { error: "Email and password are required." };
+    }
 
-  // OIDC-only users (created/linked via Authentik) have no password_hash --
-  // password login is simply not available for them, not a crash.
-  if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
-    return { error: "Invalid email or password." };
-  }
+    const user = await findActiveUserByEmail(email);
 
-  await createSession(user.id);
-  recordSignin("password");
-  redirect(safeRedirectPath(next));
+    // OIDC-only users (created/linked via Authentik) have no password_hash --
+    // password login is simply not available for them, not a crash.
+    if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+      return { error: "Invalid email or password." };
+    }
+
+    resolvedUser = user;
+    await createSession(user.id);
+    recordSignin("password");
+    redirect(safeRedirectPath(next));
+  });
 }
 
 export async function completeRegistrationAction(
@@ -111,44 +121,49 @@ export async function completeRegistrationAction(
   password: string,
   nextPath?: string,
 ): Promise<AuthActionState> {
-  if (!isPasswordAuthEnabled()) {
-    return { error: passwordAuthDisabledMessage };
-  }
+  let resolvedUser: AppUser | null = null;
 
-  const consumed = await consumeMagicLinkToken(token);
+  return withActionTelemetry("completeRegistration", () => resolvedUser, async () => {
+    if (!isPasswordAuthEnabled()) {
+      return { error: passwordAuthDisabledMessage };
+    }
 
-  if (!consumed) {
-    return {
-      error: "This registration link is expired or already used. Request a new link to continue.",
-    };
-  }
+    const consumed = await consumeMagicLinkToken(token);
 
-  if (password.length < 8) {
-    return { error: "Password must be at least 8 characters." };
-  }
+    if (!consumed) {
+      return {
+        error: "This registration link is expired or already used. Request a new link to continue.",
+      };
+    }
 
-  const existing = await findActiveUserByEmail(consumed.email);
+    if (password.length < 8) {
+      return { error: "Password must be at least 8 characters." };
+    }
 
-  if (existing) {
-    return { error: "An account already exists for this email. Please log in." };
-  }
+    const existing = await findActiveUserByEmail(consumed.email);
 
-  let user;
-
-  try {
-    user = await createUser({ email: consumed.email, password });
-  } catch (error) {
-    if (isUniqueConstraintError(error)) {
+    if (existing) {
       return { error: "An account already exists for this email. Please log in." };
     }
 
-    throw error;
-  }
+    let user;
 
-  recordSignup("password");
-  await createSession(user.id);
-  recordSignin("password");
-  redirect(safeRedirectPath(nextPath));
+    try {
+      user = await createUser({ email: consumed.email, password });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return { error: "An account already exists for this email. Please log in." };
+      }
+
+      throw error;
+    }
+
+    resolvedUser = user;
+    recordSignup("password");
+    await createSession(user.id);
+    recordSignin("password");
+    redirect(safeRedirectPath(nextPath));
+  });
 }
 
 // Deleting the app's own session cookie alone leaves the user silently
@@ -174,15 +189,21 @@ async function buildAuthentikLogoutUrl(idToken: string): Promise<string | null> 
 }
 
 export async function logoutAction() {
-  const idToken = await deleteSession();
-  recordLogout(idToken ? "oidc" : "password");
+  // Read before deleteSession() removes the row it's derived from -- otherwise there'd be no way
+  // to label this action's metrics with who logged out.
+  const user = await getOptionalUser();
 
-  if (idToken) {
-    const authentikLogoutUrl = await buildAuthentikLogoutUrl(idToken);
-    if (authentikLogoutUrl) {
-      redirect(authentikLogoutUrl);
+  return withActionTelemetry("logout", () => user, async () => {
+    const idToken = await deleteSession();
+    recordLogout(idToken ? "oidc" : "password");
+
+    if (idToken) {
+      const authentikLogoutUrl = await buildAuthentikLogoutUrl(idToken);
+      if (authentikLogoutUrl) {
+        redirect(authentikLogoutUrl);
+      }
     }
-  }
 
-  redirect("/");
+    redirect("/");
+  });
 }

@@ -36,6 +36,7 @@ import {
   isSuuntoRateLimited,
   recordFailedSuuntoAttempt,
 } from "@/lib/suunto/rate-limit";
+import { withActionTelemetry } from "@/lib/action-otel";
 
 const UNAVAILABLE_ERROR = "Suunto import is temporarily unavailable. Please try again later.";
 
@@ -135,49 +136,53 @@ function toUserError(error: unknown): { error: string; reason?: string } {
 export async function connectSuuntoAction(email: string, password: string): Promise<SuuntoActionResult> {
   const user = await requireUser();
 
-  let emailHash: string;
-  try {
-    // Validate local storage prerequisites before contacting Suunto with the user's password. If
-    // encryption/pepper config is missing, the user cannot fix it by retrying credentials.
-    assertSuuntoIntegrationConfigured();
-    emailHash = hashSuuntoEmail(email);
-  } catch (error) {
-    console.error("Suunto connect preflight failed", error);
-    return { ok: false, error: UNAVAILABLE_ERROR };
-  }
-
-  const rateLimitCheck = await checkSuuntoRateLimit(user.id, emailHash);
-  if (isSuuntoRateLimited(rateLimitCheck)) {
-    return { ok: false, error: "Too many attempts. Please wait a while before trying again." };
-  }
-
-  let login: Awaited<ReturnType<typeof suuntoLogin>>;
-  try {
-    login = await suuntoLogin(email, password);
-  } catch (error) {
-    if (error instanceof SuuntoSidecarError && error.reason === "auth_expired") {
-      await recordFailedSuuntoAttempt(user.id, email);
-      return { ok: false, error: "Could not sign in to Suunto. Check your email and password." };
+  return withActionTelemetry("connectSuunto", () => user, async () => {
+    let emailHash: string;
+    try {
+      // Validate local storage prerequisites before contacting Suunto with the user's password. If
+      // encryption/pepper config is missing, the user cannot fix it by retrying credentials.
+      assertSuuntoIntegrationConfigured();
+      emailHash = hashSuuntoEmail(email);
+    } catch (error) {
+      console.error("Suunto connect preflight failed", error);
+      return { ok: false, error: UNAVAILABLE_ERROR };
     }
-    return { ok: false, error: toUserError(error).error };
-  }
 
-  try {
-    await saveSuuntoIntegration(user.id, { email, sessionJson: login.sessionJson });
-  } catch (error) {
-    console.error("Suunto session save failed", error);
-    return { ok: false, error: UNAVAILABLE_ERROR };
-  }
+    const rateLimitCheck = await checkSuuntoRateLimit(user.id, emailHash);
+    if (isSuuntoRateLimited(rateLimitCheck)) {
+      return { ok: false, error: "Too many attempts. Please wait a while before trying again." };
+    }
 
-  revalidateSuuntoPaths();
-  return { ok: true };
+    let login: Awaited<ReturnType<typeof suuntoLogin>>;
+    try {
+      login = await suuntoLogin(email, password);
+    } catch (error) {
+      if (error instanceof SuuntoSidecarError && error.reason === "auth_expired") {
+        await recordFailedSuuntoAttempt(user.id, email);
+        return { ok: false, error: "Could not sign in to Suunto. Check your email and password." };
+      }
+      return { ok: false, error: toUserError(error).error };
+    }
+
+    try {
+      await saveSuuntoIntegration(user.id, { email, sessionJson: login.sessionJson });
+    } catch (error) {
+      console.error("Suunto session save failed", error);
+      return { ok: false, error: UNAVAILABLE_ERROR };
+    }
+
+    revalidateSuuntoPaths();
+    return { ok: true };
+  });
 }
 
 export async function disconnectSuuntoAction(): Promise<SuuntoActionResult> {
   const user = await requireUser();
-  await deleteSuuntoIntegration(user.id);
-  revalidateSuuntoPaths();
-  return { ok: true };
+  return withActionTelemetry("disconnectSuunto", () => user, async () => {
+    await deleteSuuntoIntegration(user.id);
+    revalidateSuuntoPaths();
+    return { ok: true };
+  });
 }
 
 type StageWorkoutsResult =
@@ -334,78 +339,80 @@ async function listWorkoutsForRequest(
 export async function fetchSuuntoWorkoutsAction(request: FetchSuuntoRequest): Promise<FetchSuuntoActionResult> {
   const user = await requireUser();
 
-  // Server Action arguments are client-controlled, so the discriminant is validated rather than
-  // assumed: without this, anything that isn't "days" would fall through to the expensive unbounded
-  // all-time path.
-  if (request?.mode !== "days" && request?.mode !== "all") {
-    return { ok: false, error: "Unsupported fetch mode.", reason: "bad_request" };
-  }
-
-  let sessionJson: string | null;
-  try {
-    sessionJson = await getSuuntoSessionJson(user.id);
-  } catch {
-    return { ok: false, error: UNAVAILABLE_ERROR };
-  }
-  if (!sessionJson) {
-    return { ok: false, error: "Connect Suunto before fetching workouts.", reason: "not_connected" };
-  }
-
-  if (request.mode === "days") {
-    const listed = await listWorkoutsForRequest(user.id, sessionJson, request);
-    if (!listed.ok) return listed;
-
-    const staged = await stageListedWorkouts(user.id, sessionJson, listed.workouts, null);
-    if (!staged.ok) return staged;
-    return finishFetch(user.id, staged);
-  }
-
-  // Dedicated, single-use client for the advisory lock -- deliberately not a pooled connection.
-  // pg_try_advisory_lock is session-scoped: it lives and dies with this one connection, so closing
-  // this client (below, unconditionally) always releases the lock even if the explicit unlock query
-  // itself fails. Same shape and rationale as lib/padi/sync.ts's lock.
-  const lockClient = new pg.Client({ connectionString: getDatabaseUrl() });
-  await lockClient.connect();
-
-  let lockAcquired = false;
-  try {
-    const lockResult = await lockClient.query<{ pg_try_advisory_lock: boolean }>(
-      "select pg_try_advisory_lock($1::int4, $2::int4)",
-      [ADVISORY_LOCK_CLASSID, Number(user.id)],
-    );
-    lockAcquired = lockResult.rows[0]?.pg_try_advisory_lock ?? false;
-
-    if (!lockAcquired) {
-      // Scoped wording: the lock only guards mode "all", so a concurrent mode "days" fetch is
-      // unaffected and never sees this.
-      return { ok: false, error: "An all-time Suunto fetch is already in progress.", reason: "in_progress" };
+  return withActionTelemetry("fetchSuuntoWorkouts", () => user, async () => {
+    // Server Action arguments are client-controlled, so the discriminant is validated rather than
+    // assumed: without this, anything that isn't "days" would fall through to the expensive unbounded
+    // all-time path.
+    if (request?.mode !== "days" && request?.mode !== "all") {
+      return { ok: false, error: "Unsupported fetch mode.", reason: "bad_request" };
     }
 
-    // Started before the listing, not after it: the listing alone can run for minutes, and the
-    // budget is meant to bound the whole request (and therefore how long this lock is held). If
-    // listing already blew it, the staging loop stops at its first real candidate and reports
-    // `remaining: true`, which is exactly the "click Fetch again" outcome.
-    const deadline = Date.now() + fetchAllBudgetMs();
-    const listed = await listWorkoutsForRequest(user.id, sessionJson, request);
-    if (!listed.ok) return listed;
+    let sessionJson: string | null;
+    try {
+      sessionJson = await getSuuntoSessionJson(user.id);
+    } catch {
+      return { ok: false, error: UNAVAILABLE_ERROR };
+    }
+    if (!sessionJson) {
+      return { ok: false, error: "Connect Suunto before fetching workouts.", reason: "not_connected" };
+    }
 
-    const staged = await stageListedWorkouts(user.id, sessionJson, listed.workouts, deadline);
-    if (!staged.ok) return staged;
-    return finishFetch(user.id, staged);
-  } finally {
-    if (lockAcquired) {
-      try {
-        await lockClient.query("select pg_advisory_unlock($1::int4, $2::int4)", [
-          ADVISORY_LOCK_CLASSID,
-          Number(user.id),
-        ]);
-      } catch {
-        // Best-effort: the connection closes immediately below regardless, which releases the
-        // session-scoped lock either way.
+    if (request.mode === "days") {
+      const listed = await listWorkoutsForRequest(user.id, sessionJson, request);
+      if (!listed.ok) return listed;
+
+      const staged = await stageListedWorkouts(user.id, sessionJson, listed.workouts, null);
+      if (!staged.ok) return staged;
+      return finishFetch(user.id, staged);
+    }
+
+    // Dedicated, single-use client for the advisory lock -- deliberately not a pooled connection.
+    // pg_try_advisory_lock is session-scoped: it lives and dies with this one connection, so closing
+    // this client (below, unconditionally) always releases the lock even if the explicit unlock query
+    // itself fails. Same shape and rationale as lib/padi/sync.ts's lock.
+    const lockClient = new pg.Client({ connectionString: getDatabaseUrl() });
+    await lockClient.connect();
+
+    let lockAcquired = false;
+    try {
+      const lockResult = await lockClient.query<{ pg_try_advisory_lock: boolean }>(
+        "select pg_try_advisory_lock($1::int4, $2::int4)",
+        [ADVISORY_LOCK_CLASSID, Number(user.id)],
+      );
+      lockAcquired = lockResult.rows[0]?.pg_try_advisory_lock ?? false;
+
+      if (!lockAcquired) {
+        // Scoped wording: the lock only guards mode "all", so a concurrent mode "days" fetch is
+        // unaffected and never sees this.
+        return { ok: false, error: "An all-time Suunto fetch is already in progress.", reason: "in_progress" };
       }
+
+      // Started before the listing, not after it: the listing alone can run for minutes, and the
+      // budget is meant to bound the whole request (and therefore how long this lock is held). If
+      // listing already blew it, the staging loop stops at its first real candidate and reports
+      // `remaining: true`, which is exactly the "click Fetch again" outcome.
+      const deadline = Date.now() + fetchAllBudgetMs();
+      const listed = await listWorkoutsForRequest(user.id, sessionJson, request);
+      if (!listed.ok) return listed;
+
+      const staged = await stageListedWorkouts(user.id, sessionJson, listed.workouts, deadline);
+      if (!staged.ok) return staged;
+      return finishFetch(user.id, staged);
+    } finally {
+      if (lockAcquired) {
+        try {
+          await lockClient.query("select pg_advisory_unlock($1::int4, $2::int4)", [
+            ADVISORY_LOCK_CLASSID,
+            Number(user.id),
+          ]);
+        } catch {
+          // Best-effort: the connection closes immediately below regardless, which releases the
+          // session-scoped lock either way.
+        }
+      }
+      await lockClient.end();
     }
-    await lockClient.end();
-  }
+  });
 }
 
 export async function createSuuntoDiveImportAction(
@@ -414,29 +421,31 @@ export async function createSuuntoDiveImportAction(
 ): Promise<SaveSuuntoImportActionResult> {
   const user = await requireUser();
 
-  try {
-    const result = await createDiveFromSuuntoImport(user, importId, input);
-    if (!result.inserted) {
-      return {
-        ok: false,
-        reason: result.reason,
-        error:
-          result.reason === "already_saved"
-            ? "This Suunto workout was already saved. Delete the saved dive before importing it again."
-            : "That Suunto import is no longer available.",
-      };
-    }
+  return withActionTelemetry("createSuuntoDiveImport", () => user, async () => {
+    try {
+      const result = await createDiveFromSuuntoImport(user, importId, input);
+      if (!result.inserted) {
+        return {
+          ok: false,
+          reason: result.reason,
+          error:
+            result.reason === "already_saved"
+              ? "This Suunto workout was already saved. Delete the saved dive before importing it again."
+              : "That Suunto import is no longer available.",
+        };
+      }
 
-    const [pendingCount, pending] = await Promise.all([
-      countPendingSuuntoImports(user.id),
-      listPendingSuuntoImports(user.id),
-    ]);
-    revalidateSuuntoPaths(result.dive.id);
-    return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
-  } catch (error) {
-    console.error("Suunto import save failed", error);
-    return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
-  }
+      const [pendingCount, pending] = await Promise.all([
+        countPendingSuuntoImports(user.id),
+        listPendingSuuntoImports(user.id),
+      ]);
+      revalidateSuuntoPaths(result.dive.id);
+      return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
+    } catch (error) {
+      console.error("Suunto import save failed", error);
+      return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
+    }
+  });
 }
 
 export async function mergeSuuntoDiveImportAction(
@@ -446,48 +455,53 @@ export async function mergeSuuntoDiveImportAction(
 ): Promise<SaveSuuntoImportActionResult> {
   const user = await requireUser();
 
-  try {
-    const result = await mergeSuuntoImportIntoDive(user, importId, targetDiveId, input);
-    if (!result.merged) {
-      return {
-        ok: false,
-        reason: result.reason,
-        error:
-          result.reason === "already_saved"
-            ? "This Suunto workout was already saved. Delete the saved dive before importing it again."
-            : result.reason === "missing_dive"
-              ? "That target dive is no longer available."
-              : "That Suunto import is no longer available.",
-      };
-    }
+  return withActionTelemetry("mergeSuuntoDiveImport", () => user, async () => {
+    try {
+      const result = await mergeSuuntoImportIntoDive(user, importId, targetDiveId, input);
+      if (!result.merged) {
+        return {
+          ok: false,
+          reason: result.reason,
+          error:
+            result.reason === "already_saved"
+              ? "This Suunto workout was already saved. Delete the saved dive before importing it again."
+              : result.reason === "missing_dive"
+                ? "That target dive is no longer available."
+                : "That Suunto import is no longer available.",
+        };
+      }
 
-    const [pendingCount, pending] = await Promise.all([
-      countPendingSuuntoImports(user.id),
-      listPendingSuuntoImports(user.id),
-    ]);
-    revalidateSuuntoPaths(result.dive.id);
-    return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
-  } catch (error) {
-    console.error("Suunto import merge failed", error);
-    return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
-  }
+      const [pendingCount, pending] = await Promise.all([
+        countPendingSuuntoImports(user.id),
+        listPendingSuuntoImports(user.id),
+      ]);
+      revalidateSuuntoPaths(result.dive.id);
+      return { ok: true, id: result.dive.id, pendingCount, nextImportId: pending[0]?.id ?? null };
+    } catch (error) {
+      console.error("Suunto import merge failed", error);
+      return { ok: false, error: "Something went wrong. Please try again.", reason: "unknown" };
+    }
+  });
 }
 
 export async function deleteSuuntoImportAction(importId: number): Promise<DeleteSuuntoImportActionResult> {
   const user = await requireUser();
-  const nextBeforeDelete = await getNextPendingSuuntoImportId(user.id, importId);
-  const deleted = await deleteSuuntoImport(user.id, importId);
 
-  if (!deleted) {
-    return { ok: false, error: "That Suunto import is no longer available." };
-  }
+  return withActionTelemetry("deleteSuuntoImport", () => user, async () => {
+    const nextBeforeDelete = await getNextPendingSuuntoImportId(user.id, importId);
+    const deleted = await deleteSuuntoImport(user.id, importId);
 
-  const pendingCount = await countPendingSuuntoImports(user.id);
-  const nextImportId =
-    nextBeforeDelete ?? (pendingCount > 0 ? (await listPendingSuuntoImports(user.id))[0]?.id ?? null : null);
+    if (!deleted) {
+      return { ok: false, error: "That Suunto import is no longer available." };
+    }
 
-  revalidatePath("/settings/integrations");
-  revalidatePath(`/settings/integrations/suunto/imports/${importId}`);
-  if (nextImportId !== null) revalidatePath(`/settings/integrations/suunto/imports/${nextImportId}`);
-  return { ok: true, nextImportId, pendingCount };
+    const pendingCount = await countPendingSuuntoImports(user.id);
+    const nextImportId =
+      nextBeforeDelete ?? (pendingCount > 0 ? (await listPendingSuuntoImports(user.id))[0]?.id ?? null : null);
+
+    revalidatePath("/settings/integrations");
+    revalidatePath(`/settings/integrations/suunto/imports/${importId}`);
+    if (nextImportId !== null) revalidatePath(`/settings/integrations/suunto/imports/${nextImportId}`);
+    return { ok: true, nextImportId, pendingCount };
+  });
 }

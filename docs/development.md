@@ -736,6 +736,18 @@ collector is required for local dev — the exporters are only installed when
 `scripts/notifications/otel.mjs` and logs NDJSON via
 `scripts/ndjson-console.mjs`.
 
+`lib/action-otel.ts`'s `withActionTelemetry` wraps every exported function in
+`app/actions/**` (issue #26), emitting `app.action.calls` /
+`app.action.duration`, labeled `action`, `status`
+(`success`/`failure`/`redirect`/`error` — `failure` covers the `{ ok: false }`
+half of an action's own discriminated-union result, not just thrown errors),
+and `user`. `user` is the session's email, falling back to `user:<id>` or
+`"anonymous"` — a deliberately high-cardinality label, by explicit request, so
+activity can be attributed per person. Actions that don't know their user
+until mid-flow (`loginAction`, `completeRegistrationAction`) pass a closure
+over a `let` variable assigned once the user is resolved, since
+`withActionTelemetry` reads it lazily after the wrapped function settles.
+
 ## Deployment
 
 `build-and-push.sh` builds the image and `helm upgrade --install`s

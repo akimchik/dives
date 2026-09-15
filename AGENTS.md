@@ -99,10 +99,11 @@ Agents doing work in this repo must track that work with a Gitea issue:
   follow-up comment).
 - Reference the issue number in every commit made for that work (e.g.
   `Fixes #42` or `Refs #42` in the commit message).
-- If the issue lives in a Gitea Project board, move its status to
-  "In Progress" once work begins.
+- Add the issue to appropriate Gitea Project (lookup org projects) backlog,
+  move its status to "In Progress" once work begins.
 - When the work is done, do **not** close the issue or change its status
-  yourself. Leave it open and ask the user to review the work and close (or
+  yourself, do not move it to "Done" on the project board.
+  Leave it open and ask the user to review the work and close (or
   re-triage) the issue themselves.
 
 ## Local, machine-specific instruction files

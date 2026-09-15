@@ -75,7 +75,15 @@ export async function deleteSession(): Promise<{ idToken: string | null; user: A
     );
     idToken = result.rows[0]?.id_token ?? null;
     if (result.rows[0]) {
-      user = await findActiveUserById(result.rows[0].user_id);
+      // Best-effort: this lookup exists only to label the logout metric, so it must never be able
+      // to block the cookie clear or lose the idToken above -- a DB error here (e.g. pool
+      // exhaustion) would otherwise strand the Authentik session, and permanently so, since a retry
+      // finds the row already deleted and gets no idToken at all.
+      try {
+        user = await findActiveUserById(result.rows[0].user_id);
+      } catch (error) {
+        console.error("deleteSession: failed to resolve departing user for metrics", error);
+      }
     }
   }
 

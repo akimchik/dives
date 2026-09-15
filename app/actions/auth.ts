@@ -54,6 +54,10 @@ export async function startAuthAction(
   email: string,
   nextPath?: string,
 ): Promise<StartAuthResult> {
+  // Deliberately () => null, not a thunk over the submitted `email` -- unlike loginAction, which
+  // only assigns its resolvedUser after verifyPassword succeeds, this action never authenticates
+  // anyone. Labeling the metric with the raw argument would let an unauthenticated caller mint an
+  // arbitrary metrics-backend series per POST, since `user` is a deliberately high-cardinality label.
   return withActionTelemetry("startAuth", () => null, async () => {
     if (!isPasswordAuthEnabled()) {
       throw new Error(passwordAuthDisabledMessage);

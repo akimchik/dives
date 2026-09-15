@@ -8,9 +8,13 @@ const meter = metrics.getMeter("action", "0.1.0");
 const actionCounter = meter.createCounter("app.action.calls", {
   description: "Number of server action invocations",
 });
+// Explicit boundaries, not the OTel SDK's default (which tops out at 10s): fetchSuuntoWorkoutsAction
+// alone can legitimately run for minutes (see FETCH_ALL_BUDGET_MS in app/actions/suunto.ts), and
+// the default's +Inf bucket would otherwise swallow every one of those calls indistinguishably.
 const actionDurationHistogram = meter.createHistogram("app.action.duration", {
   description: "Duration of server action invocations",
   unit: "ms",
+  advice: { explicitBucketBoundaries: [5, 25, 100, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000] },
 });
 
 export type ActionTelemetryUser = { id: string; email?: string | null } | null;
@@ -76,7 +80,6 @@ export async function withActionTelemetry<T>(
   let status: ActionStatus = "error";
 
   return tracer.startActiveSpan(`action.${actionName}`, async (span) => {
-    span.setAttribute("action.name", actionName);
     try {
       const result = await fn();
       status = resultStatus(result);
@@ -95,14 +98,24 @@ export async function withActionTelemetry<T>(
       // these calls would, per JS finally semantics, replace whatever is currently propagating --
       // including a redirect(), which is how login/logout/registration actually complete.
       try {
-        const attributes = { action: actionName, status, user: userLabel(getUser()) };
-        span.setAttributes({ "action.status": status, "action.user": attributes.user });
+        const attributes = {
+          "action.name": actionName,
+          "action.status": status,
+          "action.user": userLabel(getUser()),
+        };
+        span.setAttributes(attributes);
         actionCounter.add(1, attributes);
         actionDurationHistogram.record(performance.now() - start, attributes);
       } catch (telemetryError) {
         console.error("action telemetry failed", telemetryError);
       } finally {
-        span.end();
+        // Guarded like the block above: span.end() calls SpanProcessor.onEnd synchronously, and a
+        // throw from it would otherwise replace whatever is currently propagating (e.g. a redirect).
+        try {
+          span.end();
+        } catch (spanEndError) {
+          console.error("action span.end() failed", spanEndError);
+        }
       }
     }
   });

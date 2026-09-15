@@ -14,6 +14,7 @@ import { vi } from "vitest";
 // pin deleteSession()'s reap-and-report behavior directly, including for an already-expired
 // session, since that's exactly the case where the bug was invisible on a normal, fresh login.
 import { closeTestPool, getTestPool } from "./helpers/pg";
+import { SESSION_COOKIE_NAME } from "@/lib/auth/session-token";
 
 type CookieStore = Map<string, { value: string }>;
 const cookieStore: CookieStore = new Map();
@@ -24,8 +25,11 @@ vi.mock("next/headers", () => ({
     set: (name: string, value: string) => {
       cookieStore.set(name, { value });
     },
+    // Matches next/dist/compiled/@edge-runtime/cookies' actual delete() semantics -- rewriting the
+    // value to "" rather than removing the entry -- since that's the exact mechanism the bug this
+    // file guards against depends on (see the file header comment).
     delete: (name: string) => {
-      cookieStore.delete(name);
+      cookieStore.set(name, { value: "" });
     },
   }),
 }));
@@ -79,7 +83,7 @@ describe("deleteSession", () => {
     expect(idToken).toBeNull();
     expect(deletedUser?.id).toBe(user.id);
     expect(await sessionCountFor(user.id)).toBe(0);
-    expect(cookieStore.size).toBe(0);
+    expect(cookieStore.get(SESSION_COOKIE_NAME)?.value).toBe("");
   });
 
   it("still reaps an already-expired session and returns its user, rather than leaving the row orphaned", async () => {

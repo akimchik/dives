@@ -140,6 +140,28 @@ describe("buildDivesBackupZip", () => {
     expect(bookmarks[0]).toMatchObject({ name: "Turtle sighting", dive_id: dive.id });
   });
 
+  // Regression coverage for issue #27's lean-columns fix: listDives now nulls out suunto_profile
+  // for the UI list views, and buildDivesBackupZip must keep using the separate full-column
+  // listDivesForBackup so the backup export doesn't silently lose it too.
+  it("keeps a dive's full suunto_profile in dives.json", async () => {
+    const owner = await createOwner();
+    const profile = { source: "suunto", version: 1, workoutKey: `workout-${randomUUID()}` };
+    const result = await getTestPool().query<{ id: number }>(
+      `
+        insert into dives (user_id, title, occurred_at, suunto_workout_key, suunto_profile)
+        values ($1, $2, now(), $3, $4)
+        returning id
+      `,
+      [owner.id, "Suunto dive", profile.workoutKey, JSON.stringify(profile)],
+    );
+    const diveId = result.rows[0].id;
+
+    const { json } = await readZip(owner.id);
+    const dives = (await json("dives.json")) as { id: number; suunto_profile: unknown }[];
+    const dive = dives.find((row) => row.id === diveId);
+    expect(dive?.suunto_profile).toMatchObject(profile);
+  });
+
   it("is empty-but-valid for a user with no dives at all", async () => {
     const owner = await createOwner();
     const { json } = await readZip(owner.id);

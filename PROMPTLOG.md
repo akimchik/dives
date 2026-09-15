@@ -1212,3 +1212,14 @@ the Gitea API), so there was no board status to move.
 
 Verified: typecheck, lint, `lint:unused`, and the full test suite (163/163)
 all clean after the change.
+
+An independent `code-reviewer` pass on the pushed commit approved it with no
+CRITICAL/HIGH findings, but flagged that `dives-backup-zip.test.ts` never set
+`suunto_profile` on a fixture, so a future regression back to the lean
+`listDives` in `buildDivesBackupZip` wouldn't be caught. Added
+`keeps a dive's full suunto_profile in dives.json`, confirmed it fails against
+the pre-fix code (temporarily reverted `listDivesForBackup` back to
+`listDives` locally, watched the assertion fail, then restored the real fix)
+before committing it. Postgres integration suite: 118/120 passing (the 2
+failures are `registration.test.ts`'s pre-existing "password sign-in
+disabled" local-env mismatch, unrelated to this change).

@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -117,7 +117,7 @@ jobs:
     if: ${{ (github.event_name != 'pull_request' || !startsWith(gitea.head_ref, 'renovate/')) && (github.ref == 'refs/heads/main' && github.event_name == 'push') }}
     runs-on: ${{ github.ref == 'refs/heads/main' && 'pumpking-main' || 'pumpking-pr' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compute image tag
         id: tag

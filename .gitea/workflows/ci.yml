@@ -15,6 +15,15 @@ jobs:
   checks:
     name: Lint, test, and build
     runs-on: ${{ github.ref == 'refs/heads/main' && 'pumpking-main' || 'pumpking-pr' }}
+    # Ships Node 24.x, WebKit, and every OS-level dependency `playwright install --with-deps`
+    # would otherwise apt-get on every run -- each job here starts from a fresh ephemeral
+    # container (see pumpking's runner-config-*.yaml), so that install step re-did all of that
+    # from scratch every single run. The tag must stay pinned to @playwright/test's resolved
+    # version (Playwright refuses to find browsers on any mismatch) -- Renovate's built-in
+    # github-actions manager already tracks `container: image:` tags in workflow files the same
+    # way it tracks package.json deps, so this should get bumped automatically alongside it.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
     timeout-minutes: 20
 
     services:
@@ -69,9 +78,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps webkit
 
       - name: Run linter
         run: pnpm lint

@@ -1303,3 +1303,17 @@ Verified: `pnpm typecheck`, `pnpm lint`, `pnpm lint:unused`, `pnpm build`,
 `dives-postgres` container (120/120) all pass. Added
 `tests/unit/action-otel.test.ts` covering the wrapper's pass-through,
 error/redirect rethrow, and lazy-user-resolution behavior.
+
+## 2026-09-20 21:12 CEST — Speed up CI's Playwright browser install (issue #52)
+
+> apply same speedup change to other repos around, which have playwrite in ci
+
+(Asked in the sibling `gym` repo's session, after diagnosing there that
+pumpking's act_runner runs every job in a fresh ephemeral Docker container,
+so `pnpm exec playwright install --with-deps webkit` redownloaded WebKit and
+re-ran `apt-get install` for its OS deps from scratch every run.) Switched
+this repo's `checks` job to run inside `mcr.microsoft.com/playwright:v1.62.1-noble`
+(pinned to match the resolved `@playwright/test@1.62.1`) and dropped the
+"Install Playwright browser" step entirely -- that image ships Node 24.x,
+WebKit, and the OS deps already baked in. Verified the resulting YAML with
+js-yaml; did not trigger an actual CI run for this repo in this session.

@@ -24,6 +24,14 @@ jobs:
     # way it tracks package.json deps, so this should get bumped automatically alongside it.
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble
+      # Turbopack's dev-server file watcher + persistent cache (rehydrated from the
+      # "Restore Next.js build cache" step below) open far more file descriptors than a
+      # typical container's default nofile ulimit allows -- a known Turbopack behavior,
+      # not something this repo's code controls. Left at the image default, `pnpm
+      # test:e2e`'s `next dev` webServer can die with `TurbopackInternalError: Too many
+      # open files (os error 24)` (Refs #53; same fix already applied in gym, Refs #58
+      # there). Raise it explicitly for this job's container.
+      options: --ulimit nofile=65536:65536
     timeout-minutes: 20
 
     services:

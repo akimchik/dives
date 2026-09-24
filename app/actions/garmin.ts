@@ -321,12 +321,36 @@ async function listWorkoutsForRequest(
   request: FetchGarminRequest,
 ): Promise<{ ok: true; workouts: GarminActivitySummary[] } | { ok: false; error: string; reason?: string }> {
   try {
-    if (request.mode === "all") {
-      return { ok: true, ...(await listGarminActivities(user.id, sessionJson, { all: true })) };
+    const workouts: GarminActivitySummary[] = [];
+    let start = 0;
+    const limit = 20;
+
+    const cutoffDate = new Date();
+    if (request.mode === "days") {
+      const normalizedDaysBack = Number.isFinite(request.daysBack) ? Math.floor(request.daysBack) : 10;
+      const boundedDaysBack = Math.max(1, Math.min(365, normalizedDaysBack));
+      cutoffDate.setDate(cutoffDate.getDate() - boundedDaysBack);
+    } else {
+      cutoffDate.setFullYear(2000); // Effectively all
     }
-    const normalizedDaysBack = Number.isFinite(request.daysBack) ? Math.floor(request.daysBack) : 10;
-    const boundedDaysBack = Math.max(1, Math.min(365, normalizedDaysBack));
-    return { ok: true, ...(await listGarminActivities(user.id, sessionJson, { daysBack: boundedDaysBack })) };
+
+    while (true) {
+      const { activities } = await listGarminActivities(userId, sessionJson, { start, limit });
+      if (!activities || activities.length === 0) break;
+
+      workouts.push(...activities);
+
+      const lastActivity = activities[activities.length - 1];
+      if (lastActivity && lastActivity.startTimeLocal) {
+        const activityDate = new Date(lastActivity.startTimeLocal);
+        if (activityDate < cutoffDate) break;
+      }
+      
+      start += limit;
+      if (start > 1000) break; // Hard limit for safety
+    }
+
+    return { ok: true, workouts };
   } catch (error) {
     if (error instanceof GarminSidecarError && error.reason === "auth_expired") {
       await markGarminNeedsReconnect(userId);

@@ -267,7 +267,7 @@ export function GarminConnectForm({
       <p className="text-xs text-muted-foreground">
         Your password is sent to garminol once via stdin to create a reusable session, and is never stored.
       </p>
-      <Button type="submit" disabled={isPending || !email || !password} className="w-fit">
+      <Button type="submit" disabled={isPending} className="w-fit">
         {isPending ? <Loader2 className="animate-spin" /> : null}
         {status ? "Reconnect Garmin" : "Connect Garmin"}
       </Button>

@@ -271,7 +271,7 @@ async function stageListedWorkouts(
     const messages = parseFitBuffer(fitBuffer);
     const compiled = compileGarminProfile(key, messages);
     if (!compiled.ok) {
-      counts.skippedNonDives += 1;
+      counts.skippedNonDives += 1; console.warn("Skipped non-dive:", compiled.error);
       continue;
     }
 

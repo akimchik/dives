@@ -66,7 +66,7 @@ export function compileGarminProfile(
   }
 
   if (!isDescent) {
-    return { ok: false, error: "Data is not from a Garmin Descent device", reason: "not_descent" };
+    console.warn("Activity is from a Garmin device not strictly in the Descent list, but importing anyway.");
   }
 
   const diveSettingsMsg = fitMessages.diveSettingsMesgs?.[0];

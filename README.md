@@ -26,7 +26,20 @@ project `dev-dives`.
 pnpm install
 docker-compose up -d postgres
 pnpm db:migrate
+
+# Start the main Next.js development server
 pnpm dev
+```
+
+To run the Garmin Connect integration sidecar locally (required for Garmin syncing):
+```sh
+# The sidecar has its own isolated dependencies that must be installed first
+cd scripts/garmin-sidecar
+npm install
+cd ../..
+
+# Run the sidecar in a separate terminal
+pnpm garmin:sidecar
 ```
 
 See [`docs/development.md`](docs/development.md) for the full local setup,

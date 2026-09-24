@@ -1317,3 +1317,14 @@ this repo's `checks` job to run inside `mcr.microsoft.com/playwright:v1.62.1-nob
 "Install Playwright browser" step entirely -- that image ships Node 24.x,
 WebKit, and the OS deps already baked in. Verified the resulting YAML with
 js-yaml; did not trigger an actual CI run for this repo in this session.
+## 2026-09-10 09:50 — Garmin dive sync integration planning
+
+> OK we are at the beautiful project named dives. Please review the project, read all the documentation and skills and provide me short summary, than create garmin-sync branch and shall we start planning to write module that will be doing the same what it does for suunto but for Garmin (dive watches and computers) dive synchronizations.
+
+## 2026-09-10 11:20 — Garmin plan open questions answers
+
+> answering questions here:
+> 1. for session it is option A but!!! I think we need to figure out the session TTL in this case otherwise how will you go and manage this?
+> 2. A definitely, but if we are in a pod... it is not persistent right? How is the suunto stores the data in this case?
+> 3. It is C as we are talking about garmin dive I guess and we need to filter apnea from gas diving. Figure out of how to do this.
+> 4. It is B only. We do not support something that is not a diving computer.

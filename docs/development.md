@@ -784,3 +784,11 @@ pnpm garmin:sidecar
 ```
 
 The sidecar will start on `http://127.0.0.1:4818`. The main Next.js app communicates with it automatically when interacting with Garmin Connect in the UI.
+
+## Garmin staged imports
+
+The Garmin integration runs via a Node.js sidecar (`garmin-sidecar`) on port 4818.
+- The sidecar leverages the `garmin-connect` library to download FIT files as ZIP archives.
+- Garmin activities are verified and compiled into dives via `@garmin/fitsdk`.
+- Because FIT logs contain high-frequency telemetry, they must be merged into "staged" imports before converting into standard dive logs in the main database.
+- The UI handles reviewing staged imports at `/settings/integrations/garmin/imports/[id]`.

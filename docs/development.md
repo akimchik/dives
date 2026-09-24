@@ -766,3 +766,21 @@ container and the notification-worker CronJob — as the low-privilege
 off `OTEL_DEPLOYMENT_ENVIRONMENT=dev` (`lib/deployment-stage.ts`). Both stay
 request-time rather than statically baked, since one image is built and
 deployed to every stage.
+
+
+## Garmin Integration Sidecar
+
+The Garmin Connect integration requires a stateless pod-local HTTP sidecar to negotiate the OAuth login flow and download binary FIT files safely.
+
+To run the sidecar locally:
+```sh
+# 1. Install the sidecar's specific dependencies
+cd scripts/garmin-sidecar
+npm install
+cd ../..
+
+# 2. Run the sidecar alongside the main dev server
+pnpm garmin:sidecar
+```
+
+The sidecar will start on `http://127.0.0.1:4818`. The main Next.js app communicates with it automatically when interacting with Garmin Connect in the UI.

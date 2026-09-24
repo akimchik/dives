@@ -75,7 +75,7 @@ async function listActivities(payload) {
     throw err;
   }
 
-  const GCClient = new GarminConnect();
+  const GCClient = new GarminConnect({ username: 'a', password: 'b' });
   GCClient.loadToken(oauth1, oauth2);
 
   try {
@@ -102,7 +102,7 @@ async function downloadFit(payload) {
     throw err;
   }
 
-  const GCClient = new GarminConnect();
+  const GCClient = new GarminConnect({ username: 'a', password: 'b' });
   GCClient.loadToken(oauth1, oauth2);
 
   try {

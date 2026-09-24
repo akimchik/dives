@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { GarminDiveProfilePoint } from "@/lib/garmin/profile";
 import { cn } from "@/lib/utils";
 
-type SeriesKey = "depth" | "temperature";
+type SeriesKey =
   | "depth"
   | "temperature"
   | "tankPressure"

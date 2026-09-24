@@ -108,9 +108,17 @@ async function downloadFit(payload) {
   try {
     logEvent("garmin.activities.download.start", { activityId });
     
-    // Download activity FIT file. The Garmin API usually returns a ZIP containing the FIT.
-    // GCClient.downloadActivity returns a buffer (usually a zip containing the .fit file).
-    const buffer = await GCClient.downloadActivity(activityId);
+    // Download activity FIT file (Garmin API returns a ZIP containing the FIT).
+    const os = await import('os');
+    const path = await import('path');
+    const fsPromises = await import('fs/promises');
+    
+    const tmpDir = os.tmpdir();
+    await GCClient.downloadOriginalActivityData({ activityId }, tmpDir, 'zip');
+    
+    const zipPath = path.join(tmpDir, activityId + '.zip');
+    const buffer = await fsPromises.readFile(zipPath);
+    await fsPromises.unlink(zipPath).catch(() => {}); // cleanup
     
     const updatedOauth1 = GCClient.client.oauth1Token;
     const updatedOauth2 = GCClient.client.oauth2Token;

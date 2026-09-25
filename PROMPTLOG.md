@@ -1328,3 +1328,24 @@ js-yaml; did not trigger an actual CI run for this repo in this session.
 > 2. A definitely, but if we are in a pod... it is not persistent right? How is the suunto stores the data in this case?
 > 3. It is C as we are talking about garmin dive I guess and we need to filter apnea from gas diving. Figure out of how to do this.
 > 4. It is B only. We do not support something that is not a diving computer.
+
+## 2026-09-25 14:00 — Garmin Integration UI & Parser Fixes
+
+> I cleaned up all the dives but I'd like also to see this button once garmin is logged in necxt to the suunto should be something like 'garmin sync' OK?
+
+> what the fuck with parser:
+> Image #1 this app
+> image #2 garmin connect :( 
+> like... are you kidding me?Q!
+
+> do we need those docker exec commands still running?
+
+> OK, skip it this one was too short. The next one:
+> but also the temperature:
+> it seems like I have this parameters, why they are parsed wrongly?
+
+> what shold I do, to reupload the dive or re-check?
+
+> все клас, тепер давай оновим останнє, треба величини як глибина, середня глибина, окрім широти та довготи і позиції (site location), округлити до 2 цифр після коми, і будьласка
+
+> OK! Now!!! It is time to review the documentation and update requirements in all related to the changes were implemented during this session.

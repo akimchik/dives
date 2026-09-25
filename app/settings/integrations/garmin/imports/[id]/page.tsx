@@ -122,7 +122,7 @@ export default async function ReviewGarminImportPage({ params }: { params: Promi
         <Card className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
           <CardContent className="px-4 text-sm">
             Review and edit the imported fields, then save it as a normal dive. This dive will keep
-            Garmin activity id <span className="font-mono">{pending.activity_key}</span> and can be
+            Garmin activity id <span className="font-mono">{pending.activity_id}</span> and can be
             uploaded to PADI later.
           </CardContent>
         </Card>

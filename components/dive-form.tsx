@@ -468,7 +468,7 @@ function formatCylinderOption(option: RecentCylinder): string {
   return [option.tankInfo, size].filter(Boolean).join(" · ") || "—";
 }
 
-function formatCandidate(candidate: SuuntoMergeCandidate): string {
+function formatCandidate(candidate: MergeCandidate): string {
   const date = new Date(candidate.occurredAt);
   const when = Number.isFinite(date.getTime()) ? date.toLocaleString() : candidate.occurredAt;
   const details = [
@@ -785,7 +785,7 @@ export function DiveForm({
     startTransition(async () => {
       const result = suuntoImportId !== undefined
           ? await mergeSuuntoDiveImportAction(suuntoImportId, mergeTargetId, input)
-          : await mergeGarminDiveImportAction(garminImportId, mergeTargetId, input);
+          : await mergeGarminDiveImportAction(garminImportId!, mergeTargetId!, input);
 
       if (!result.ok) {
         toast.error(result.error);

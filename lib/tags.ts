@@ -8,7 +8,6 @@ export type IntegrationConnections = {
   padiConnected: boolean;
   suuntoConnected: boolean;
   garminConnected: boolean;
-  garminConnected: boolean;
 };
 
 type TaggableDive = Pick<DiveSnapshot, "tags" | "padi_dive_id" | "suunto_workout_key" | "garmin_activity_id">;

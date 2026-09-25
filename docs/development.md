@@ -787,8 +787,19 @@ The sidecar will start on `http://127.0.0.1:4818`. The main Next.js app communic
 
 ## Garmin staged imports
 
-The Garmin integration runs via a Node.js sidecar (`garmin-sidecar`) on port 4818.
-- The sidecar leverages the `garmin-connect` library to download FIT files as ZIP archives.
-- Garmin activities are verified and compiled into dives via `@garmin/fitsdk`.
-- Because FIT logs contain high-frequency telemetry, they must be merged into "staged" imports before converting into standard dive logs in the main database.
-- The UI handles reviewing staged imports at `/settings/integrations/garmin/imports/[id]`.
+Garmin integration mirrors the Suunto fetch-only architecture, utilizing a user-triggered sync. It relies on a local Node.js sidecar (`scripts/garmin-sidecar/server.mjs`) running on port 4818.
+- The sidecar leverages the `garmin-connect` library to handle OAuth negotiation and download raw activity data. The sidecar specifically downloads activities as ZIP archives containing `.fit` binary files.
+- The Next.js app receives these ZIP archives, unzips them natively (`lib/garmin/raw-fit.ts`), and extracts the underlying `.fit` file buffer. 
+- Garmin FIT binaries are decoded into messages via `@garmin/fitsdk`. The `compileGarminProfile` logic filters out Apnea/Free diving activities, checking that the device originates from the Descent family.
+
+### Garmin Profile Parsing & Rounding
+Because FIT logs rely heavily on high-frequency telemetry records and sometimes omit session-level summaries, the parser reconstructs essential dive metrics:
+- **Depth**: Both `maxDepth` and `averageDepth` are verified against the `recordMesgs` telemetry arrays. To avoid noisy floating-point anomalies (e.g., `5.990305...`), these values are strictly rounded to 2 decimal places.
+- **Temperatures**: `waterTemp` (Surface) is pulled from `diveSettingsMesgs` or the first available record. `waterTempLow` (Lowest) is aggressively extracted by finding the absolute minimum temperature across all individual time-series points.
+- **Gases**: `gasMix` is decoded from `diveGasMesgs`. If `oxygenContent` equals 21, it maps cleanly to `Air`; otherwise, it generates standard EAN labels (e.g., `EAN32`).
+
+### Staging and UI Review
+Like Suunto, parsed activities are buffered in the `garmin_imports` table to allow the user to review or merge them before they pollute the main `dives` logbook. 
+- The staging UI form at `/settings/integrations/garmin/imports/[id]` uses visual placeholder text (e.g., grayed-out `EAN32`, `21.0°C`, `12L steel`) to indicate format expectations when fields are genuinely empty.
+- Real data extracted via the FIT parser overrides these placeholders as solid pre-filled values. Deduplication ensures that already-staged or imported dives (by `activity_id`) are skipped during subsequent syncs.
+

@@ -146,7 +146,7 @@ export function GarminProfileChart({
             axisLine={false}
             tickMargin={8}
             domain={[0, "dataMax"]}
-            tickFormatter={(value: number) => `${Math.round(value)} min`}
+            tickFormatter={(value: number) => `${Math.round(value / 60)} min`}
           />
           {activeSeries.map((series) => (
             <YAxis
@@ -170,7 +170,7 @@ export function GarminProfileChart({
                 indicator="line"
                 // See the matching comment in depth-profile-chart.tsx: `value` here isn't the raw
                 // axis value for a numeric x-axis, so read the real time off the payload instead.
-                labelFormatter={(_, payload) => `${Math.round(Number(payload?.[0]?.payload?.time ?? 0))} min`}
+                labelFormatter={(_, payload) => `${Math.round(Number(payload?.[0]?.payload?.time ?? 0) / 60)} min`}
               />
             }
           />

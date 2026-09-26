@@ -112,7 +112,6 @@ garminSidecar:
     repository: ""
     pullPolicy: Always
     tag: ""
-  resources: {}
 
 
 suuntoSidecar:

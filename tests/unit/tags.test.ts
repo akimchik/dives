@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTagCloud, effectiveTags, MISSING_PADI_TAG, MISSING_SUUNTO_TAG } from "@/lib/tags";
+import { buildTagCloud, effectiveTags, MISSING_PADI_TAG, MISSING_SUUNTO_TAG, MISSING_GARMIN_TAG } from "@/lib/tags";
 
 function dive(overrides: { tags?: string[]; padi_dive_id?: number | null; suunto_workout_key?: string | null; garmin_activity_id?: string | null } = {}) {
   return {
@@ -32,11 +32,20 @@ describe("effectiveTags", () => {
     ).toEqual([]);
   });
 
+
+  it("adds missing-garmin only for a Garmin-connected user whose dive has no garmin_activity_id", () => {
+    expect(effectiveTags(dive(), { padiConnected: false, suuntoConnected: false, garminConnected: true })).toEqual(["missing-garmin"]);
+    expect(
+      effectiveTags(dive({ garmin_activity_id: "12345" }), { padiConnected: false, suuntoConnected: false, garminConnected: true }),
+    ).toEqual([]);
+  });
+
   it("combines stored tags with both virtual tags", () => {
-    expect(effectiveTags(dive({ tags: ["wreck"] }), { padiConnected: true, suuntoConnected: true, garminConnected: false })).toEqual([
+    expect(effectiveTags(dive({ tags: ["wreck"] }), { padiConnected: true, suuntoConnected: true, garminConnected: true })).toEqual([
       "wreck",
       MISSING_PADI_TAG,
       MISSING_SUUNTO_TAG,
+      MISSING_GARMIN_TAG,
     ]);
   });
 });
@@ -61,6 +70,13 @@ describe("buildTagCloud", () => {
 
     expect(buildTagCloud(dives, { padiConnected: true, suuntoConnected: false, garminConnected: false })).toEqual([
       { tag: MISSING_PADI_TAG, count: 1 },
+    ]);
+  });
+  it("folds missing-garmin into the same cloud when connected", () => {
+    const dives = [dive({ garmin_activity_id: null }), dive({ garmin_activity_id: "1" })];
+
+    expect(buildTagCloud(dives, { padiConnected: false, suuntoConnected: false, garminConnected: true })).toEqual([
+      { tag: MISSING_GARMIN_TAG, count: 1 },
     ]);
   });
 });

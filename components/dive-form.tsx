@@ -758,7 +758,7 @@ export function DiveForm({
       // push could resolve from the stale cache before refresh got a chance to invalidate it).
       router.refresh();
       if (garminImportId !== undefined && "nextImportId" in result && result.nextImportId !== null) {
-        router.push("/settings/integrations/garmin/imports/" + result.nextImportId);
+        router.push(`/settings/integrations/garmin/imports/${result.nextImportId}`);
         return;
       }
       if (suuntoImportId !== undefined && "nextImportId" in result && result.nextImportId !== null) {
@@ -798,7 +798,7 @@ export function DiveForm({
       router.refresh();
       if ("nextImportId" in result && result.nextImportId !== null) {
         if (garminImportId !== undefined) {
-          router.push("/settings/integrations/garmin/imports/" + result.nextImportId);
+          router.push(`/settings/integrations/garmin/imports/${result.nextImportId}`);
         } else {
           router.push(`/settings/integrations/suunto/imports/${result.nextImportId}`);
         }

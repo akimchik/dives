@@ -1191,7 +1191,7 @@ export function DiveForm({
                   <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-md border p-3 text-sm">
                     <input
                       type="radio"
-                      name="suunto-merge-target"
+                      name="import-merge-target"
                       checked={mergeTargetId === candidate.id}
                       onChange={() => setMergeTargetId(candidate.id)}
                       disabled={isPending}
@@ -1260,7 +1260,7 @@ export function DiveForm({
                         <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
                           <input
                             type="radio"
-                            name={`suunto-merge-${field.key}`}
+                            name={`import-merge-${field.key}`}
                             checked={mergeChoices[field.key] === "import"}
                             onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "import" }))}
                             disabled={isPending}
@@ -1270,7 +1270,7 @@ export function DiveForm({
                         <label className="flex min-w-0 cursor-pointer items-center gap-2 text-sm">
                           <input
                             type="radio"
-                            name={`suunto-merge-${field.key}`}
+                            name={`import-merge-${field.key}`}
                             checked={mergeChoices[field.key] === "target"}
                             onChange={() => setMergeChoices((current) => ({ ...current, [field.key]: "target" }))}
                             disabled={isPending}

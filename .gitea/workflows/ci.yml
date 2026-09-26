@@ -100,7 +100,12 @@ jobs:
         run: pnpm test:pg
 
       - name: Run end-to-end tests
-        run: pnpm test:e2e
+        # `timeout-minutes` on the job doesn't reliably stop this step: in the
+        # media repo, a hung e2e run (next dev/Turbopack surviving SIGTERM
+        # during Playwright's webServer teardown) tied up a runner for 3h13m
+        # despite `timeout-minutes: 20` (software-engineer-vinokurov/media#53).
+        # Bound it directly instead.
+        run: timeout --kill-after=30s 10m pnpm test:e2e
 
       - name: Upload Playwright test results
         if: always()
